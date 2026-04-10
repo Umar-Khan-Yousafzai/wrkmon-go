@@ -5,16 +5,45 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/mpv"
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/store"
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/ytdlp"
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/config"
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui"
+	_ "github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/layouts/single"
 )
 
-type model struct{}
-
-func (m model) Init() tea.Cmd { return tea.Quit }
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { return m, tea.Quit }
-func (m model) View() string { return "wrkmon-go v2.0.0-dev\n" }
-
 func main() {
-	p := tea.NewProgram(model{})
+	cfg := config.Load()
+
+	// Initialize adapters.
+	searcher, err := ytdlp.NewClient(cfg.YtDlpPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "yt-dlp not found: %v\nInstall yt-dlp: pip install yt-dlp\n", err)
+		os.Exit(1)
+	}
+
+	player := mpv.New()
+
+	dbPath := config.DBPath()
+	storage, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "database error: %v\n", err)
+		os.Exit(1)
+	}
+	defer storage.Close()
+
+	// Create facade and app.
+	facade := tui.NewFacade(searcher, player, storage)
+	defer facade.Close()
+
+	app := tui.NewApp(facade, cfg.Theme)
+
+	// Ensure data directory exists.
+	os.MkdirAll(config.DataDir(), 0o755)
+
+	// Run the TUI.
+	p := tea.NewProgram(app, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
