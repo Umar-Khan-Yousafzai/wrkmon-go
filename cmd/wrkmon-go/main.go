@@ -13,6 +13,8 @@ import (
 	_ "github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/layouts/single"
 )
 
+var version = "dev"
+
 func main() {
 	cfg := config.Load()
 
