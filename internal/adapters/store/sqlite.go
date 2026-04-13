@@ -83,6 +83,24 @@ func (s *SQLiteStore) migrate() error {
 		expires_at   INTEGER NOT NULL,
 		PRIMARY KEY (query)
 	);
+
+	CREATE TABLE IF NOT EXISTS playlists (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		name       TEXT NOT NULL UNIQUE,
+		created_at TEXT NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS playlist_items (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+		video_id    TEXT NOT NULL,
+		title       TEXT NOT NULL,
+		channel     TEXT NOT NULL DEFAULT '',
+		duration_ms INTEGER NOT NULL DEFAULT 0,
+		position    INTEGER NOT NULL,
+		added_at    TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_playlist_items_pid ON playlist_items(playlist_id, position);
 	`
 	_, err := s.db.Exec(schema)
 	return err
@@ -297,6 +315,113 @@ func (s *SQLiteStore) GetCachedSearch(ctx context.Context, query string) ([]core
 		return nil, false, nil // corrupted cache = miss
 	}
 	return results, true, nil
+}
+
+// CreatePlaylist creates a new playlist. Returns error if name already exists.
+func (s *SQLiteStore) CreatePlaylist(ctx context.Context, name string) (core.Playlist, error) {
+	now := time.Now()
+	res, err := s.db.ExecContext(ctx,
+		`INSERT INTO playlists (name, created_at) VALUES (?, ?)`,
+		name, now.Format(time.RFC3339),
+	)
+	if err != nil {
+		return core.Playlist{}, fmt.Errorf("create playlist: %w", err)
+	}
+	id, _ := res.LastInsertId()
+	return core.Playlist{ID: int(id), Name: name, CreatedAt: now}, nil
+}
+
+// ListPlaylists returns all playlists with track counts.
+func (s *SQLiteStore) ListPlaylists(ctx context.Context) ([]core.Playlist, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, name, created_at FROM playlists ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var playlists []core.Playlist
+	for rows.Next() {
+		var p core.Playlist
+		var createdAt string
+		if err := rows.Scan(&p.ID, &p.Name, &createdAt); err != nil {
+			return nil, err
+		}
+		p.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		playlists = append(playlists, p)
+	}
+	return playlists, rows.Err()
+}
+
+// GetPlaylist returns a playlist with all its tracks.
+func (s *SQLiteStore) GetPlaylist(ctx context.Context, id int) (core.Playlist, error) {
+	var p core.Playlist
+	var createdAt string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT id, name, created_at FROM playlists WHERE id = ?`, id,
+	).Scan(&p.ID, &p.Name, &createdAt)
+	if err != nil {
+		return core.Playlist{}, fmt.Errorf("playlist not found: %w", err)
+	}
+	p.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+
+	// Load tracks
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT video_id, title, channel, duration_ms, added_at
+		 FROM playlist_items WHERE playlist_id = ? ORDER BY position`, id)
+	if err != nil {
+		return p, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var t core.Track
+		var durationMs int64
+		var addedAt string
+		if err := rows.Scan(&t.VideoID, &t.Title, &t.Channel, &durationMs, &addedAt); err != nil {
+			return p, err
+		}
+		t.Duration = time.Duration(durationMs) * time.Millisecond
+		t.AddedAt, _ = time.Parse(time.RFC3339, addedAt)
+		p.Tracks = append(p.Tracks, t)
+	}
+	return p, rows.Err()
+}
+
+// DeletePlaylist removes a playlist and all its items.
+func (s *SQLiteStore) DeletePlaylist(ctx context.Context, id int) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM playlists WHERE id = ?`, id)
+	return err
+}
+
+// AddToPlaylist appends a track to a playlist.
+func (s *SQLiteStore) AddToPlaylist(ctx context.Context, playlistID int, track core.Track) error {
+	// Get next position
+	var maxPos sql.NullInt64
+	s.db.QueryRowContext(ctx,
+		`SELECT MAX(position) FROM playlist_items WHERE playlist_id = ?`, playlistID,
+	).Scan(&maxPos)
+	nextPos := 0
+	if maxPos.Valid {
+		nextPos = int(maxPos.Int64) + 1
+	}
+
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO playlist_items (playlist_id, video_id, title, channel, duration_ms, position, added_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		playlistID, track.VideoID, track.Title, track.Channel,
+		track.Duration.Milliseconds(), nextPos, time.Now().Format(time.RFC3339),
+	)
+	return err
+}
+
+// RemoveFromPlaylist removes a track at given position from a playlist.
+func (s *SQLiteStore) RemoveFromPlaylist(ctx context.Context, playlistID int, position int) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM playlist_items WHERE playlist_id = ? AND position = ?`,
+		playlistID, position,
+	)
+	return err
 }
 
 // Close closes the underlying database connection.

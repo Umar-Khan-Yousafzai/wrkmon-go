@@ -24,6 +24,8 @@ const (
 	viewQueue
 	viewHistory
 	viewNowPlaying
+	viewPlaylists
+	viewPlaylistDetail
 )
 
 func (v activeView) String() string {
@@ -36,6 +38,10 @@ func (v activeView) String() string {
 		return "history"
 	case viewNowPlaying:
 		return "now playing"
+	case viewPlaylists:
+		return "playlists"
+	case viewPlaylistDetail:
+		return "playlist"
 	default:
 		return "unknown"
 	}
@@ -68,6 +74,12 @@ type App struct {
 	// History state
 	historyEntries []core.HistoryEntry
 	historyCursor  int
+
+	// Playlist state
+	playlists       []core.Playlist
+	playlistCursor  int
+	currentPlaylist core.Playlist
+	plDetailCursor  int
 
 	// Playback position tracking
 	currentPos float64
@@ -286,8 +298,52 @@ func (a *App) buildCommands() *commands.Dispatcher {
 		},
 	})
 
+	d.Register(commands.Command{
+		Name:        "/playlist",
+		Description: "Manage playlists: /playlist [create|play|delete|add] [args]",
+		Handler: func(args string) (string, error) {
+			args = strings.TrimSpace(args)
+			if args == "" {
+				// Show playlists view
+				a.currentView = viewPlaylists
+				return "LOAD_PLAYLISTS", nil
+			}
+			parts := strings.SplitN(args, " ", 2)
+			sub := parts[0]
+			subArgs := ""
+			if len(parts) > 1 {
+				subArgs = strings.TrimSpace(parts[1])
+			}
+
+			switch sub {
+			case "create":
+				if subArgs == "" {
+					return "", fmt.Errorf("usage: /playlist create <name>")
+				}
+				return "PL_CREATE:" + subArgs, nil
+			case "play":
+				if subArgs == "" {
+					return "", fmt.Errorf("usage: /playlist play <id>")
+				}
+				return "PL_PLAY:" + subArgs, nil
+			case "delete":
+				if subArgs == "" {
+					return "", fmt.Errorf("usage: /playlist delete <id>")
+				}
+				return "PL_DELETE:" + subArgs, nil
+			case "add":
+				if subArgs == "" {
+					return "", fmt.Errorf("usage: /playlist add <playlist_id>")
+				}
+				return "PL_ADD:" + subArgs, nil
+			default:
+				return "", fmt.Errorf("unknown: /playlist %s. Use create|play|delete|add", sub)
+			}
+		},
+	})
+
 	// Reserve v2.x namespaces (hidden)
-	for _, ns := range []string{"/playlist", "/lyrics", "/download", "/eq", "/focus", "/sleep"} {
+	for _, ns := range []string{"/eq", "/focus"} {
 		name := ns
 		d.Register(commands.Command{
 			Name:        name,
@@ -394,22 +450,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, tea.Batch(cmds...)
 			}
 		case "esc":
-			// Clear help text or switch to search view
+			// Clear help text, go back from detail, or switch to search
 			if a.helpText != "" {
 				a.helpText = ""
+			} else if a.currentView == viewPlaylistDetail {
+				a.currentView = viewPlaylists
 			} else {
 				a.currentView = viewSearch
 			}
 			return a, nil
 		case "tab":
 			if a.prompt.Value() == "" {
-				// Cycle views: search → queue → now playing → history → search
+				// Cycle views: search → queue → now playing → playlists → history → search
 				switch a.currentView {
 				case viewSearch:
 					a.currentView = viewQueue
 				case viewQueue:
 					a.currentView = viewNowPlaying
 				case viewNowPlaying:
+					a.currentView = viewPlaylists
+					cmds = append(cmds, a.doLoadPlaylists())
+				case viewPlaylists, viewPlaylistDetail:
 					a.currentView = viewHistory
 					a.loading = true
 					cmds = append(cmds, a.doLoadHistory())
@@ -430,8 +491,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.currentView = viewSearch
 				case viewNowPlaying:
 					a.currentView = viewQueue
-				case viewHistory:
+				case viewPlaylists, viewPlaylistDetail:
 					a.currentView = viewNowPlaying
+				case viewHistory:
+					a.currentView = viewPlaylists
+					cmds = append(cmds, a.doLoadPlaylists())
 				}
 				return a, tea.Batch(cmds...)
 			}
@@ -531,6 +595,25 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, a.toast.Show("yt-dlp: "+msg.Output, false))
 		}
 
+	case PlaylistsLoadedMsg:
+		a.loading = false
+		if msg.Err != nil {
+			cmds = append(cmds, a.toast.Show("Playlists error: "+msg.Err.Error(), true))
+		} else {
+			a.playlists = msg.Playlists
+			a.playlistCursor = 0
+		}
+
+	case PlaylistDetailMsg:
+		a.loading = false
+		if msg.Err != nil {
+			cmds = append(cmds, a.toast.Show(msg.Err.Error(), true))
+		} else {
+			a.currentPlaylist = msg.Playlist
+			a.plDetailCursor = 0
+			a.currentView = viewPlaylistDetail
+		}
+
 	case StreamURLMsg:
 		// Handled by PlayTrack in facade; this msg type exists for future use.
 	}
@@ -613,6 +696,10 @@ func (a *App) renderContent(height int) string {
 		content = a.renderHistoryView()
 	case viewNowPlaying:
 		content = a.renderNowPlayingView()
+	case viewPlaylists:
+		content = a.renderPlaylistsView()
+	case viewPlaylistDetail:
+		content = a.renderPlaylistDetailView()
 	}
 
 	// Pad or truncate to fill content area.
@@ -813,6 +900,71 @@ func (a *App) renderNowPlayingView() string {
 	return b.String()
 }
 
+func (a *App) renderPlaylistsView() string {
+	if len(a.playlists) == 0 {
+		return a.styles.Muted.Render("  No playlists yet.\n\n  /playlist create <name> to create one.")
+	}
+
+	var b strings.Builder
+	header := a.styles.Title.Render(fmt.Sprintf("  Playlists (%d)", len(a.playlists)))
+	b.WriteString(header)
+	b.WriteString("\n\n")
+
+	for i, p := range a.playlists {
+		cursor := "  "
+		if i == a.playlistCursor {
+			cursor = a.styles.Accent.Render("> ")
+		}
+		num := a.styles.Muted.Render(fmt.Sprintf("%2d. ", i+1))
+		name := p.Name
+		if i == a.playlistCursor {
+			name = a.styles.Selected.Render(name)
+		}
+		id := a.styles.Muted.Render(fmt.Sprintf(" (id:%d)", p.ID))
+		b.WriteString(cursor + num + name + id + "\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(a.styles.Muted.Render("  Enter: open  •  /playlist play <id>  •  /playlist delete <id>"))
+
+	return b.String()
+}
+
+func (a *App) renderPlaylistDetailView() string {
+	p := a.currentPlaylist
+	if len(p.Tracks) == 0 {
+		return a.styles.Title.Render(fmt.Sprintf("  %s", p.Name)) + "\n\n" +
+			a.styles.Muted.Render("  Empty playlist. Play a track, then /playlist add "+fmt.Sprintf("%d", p.ID))
+	}
+
+	var b strings.Builder
+	header := a.styles.Title.Render(fmt.Sprintf("  %s (%d tracks)", p.Name, len(p.Tracks)))
+	b.WriteString(header)
+	b.WriteString("\n\n")
+
+	for i, t := range p.Tracks {
+		cursor := "  "
+		if i == a.plDetailCursor {
+			cursor = a.styles.Accent.Render("> ")
+		}
+		num := a.styles.Muted.Render(fmt.Sprintf("%2d. ", i+1))
+		dur := formatDuration(t.Duration)
+
+		title := t.Title
+		if i == a.plDetailCursor {
+			title = a.styles.Selected.Render(title)
+		}
+		channel := a.styles.Muted.Render(" - " + t.Channel)
+		duration := a.styles.Muted.Render(" [" + dur + "]")
+		b.WriteString(cursor + num + title + channel + duration + "\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(a.styles.Muted.Render(fmt.Sprintf("  Enter: play  •  /playlist play %d (play all)  •  Esc: back", p.ID)))
+
+	return b.String()
+}
+
 // handleSubmit processes user input from the prompt.
 func (a *App) handleSubmit(input string) tea.Cmd {
 	input = strings.TrimSpace(input)
@@ -838,6 +990,26 @@ func (a *App) handleSubmit(input string) tea.Cmd {
 			return a.doPrevTrack()
 		case result == "UPDATE_YTDLP":
 			return a.doUpdateYtDlp()
+		case result == "LOAD_PLAYLISTS":
+			return a.doLoadPlaylists()
+		case strings.HasPrefix(result, "PL_CREATE:"):
+			name := strings.TrimPrefix(result, "PL_CREATE:")
+			return a.doCreatePlaylist(name)
+		case strings.HasPrefix(result, "PL_PLAY:"):
+			idStr := strings.TrimPrefix(result, "PL_PLAY:")
+			var id int
+			fmt.Sscanf(idStr, "%d", &id)
+			return a.doPlayPlaylist(id)
+		case strings.HasPrefix(result, "PL_DELETE:"):
+			idStr := strings.TrimPrefix(result, "PL_DELETE:")
+			var id int
+			fmt.Sscanf(idStr, "%d", &id)
+			return a.doDeletePlaylist(id)
+		case strings.HasPrefix(result, "PL_ADD:"):
+			idStr := strings.TrimPrefix(result, "PL_ADD:")
+			var id int
+			fmt.Sscanf(idStr, "%d", &id)
+			return a.doAddToPlaylist(id)
 		case strings.HasPrefix(result, "SEARCH:"):
 			query := strings.TrimPrefix(result, "SEARCH:")
 			a.searchQuery = query
@@ -848,10 +1020,13 @@ func (a *App) handleSubmit(input string) tea.Cmd {
 			return a.toast.Show(result, false)
 		}
 
-		// View-switching commands (/history) need to trigger data loading.
+		// View-switching commands need to trigger data loading.
 		if a.currentView == viewHistory {
 			a.loading = true
 			return a.doLoadHistory()
+		}
+		if a.currentView == viewPlaylists {
+			return a.doLoadPlaylists()
 		}
 
 		return nil
@@ -891,6 +1066,23 @@ func (a *App) handleEnterOnList() tea.Cmd {
 			})
 			return a.doPlayTrack(track)
 		}
+	case viewPlaylists:
+		// Enter on playlist list = open detail view
+		if a.playlistCursor >= 0 && a.playlistCursor < len(a.playlists) {
+			return a.doLoadPlaylistDetail(a.playlists[a.playlistCursor].ID)
+		}
+	case viewPlaylistDetail:
+		// Enter on playlist track = play it
+		if a.plDetailCursor >= 0 && a.plDetailCursor < len(a.currentPlaylist.Tracks) {
+			t := a.currentPlaylist.Tracks[a.plDetailCursor]
+			track := a.facade.AddToQueue(core.SearchResult{
+				VideoID:  t.VideoID,
+				Title:    t.Title,
+				Channel:  t.Channel,
+				Duration: t.Duration,
+			})
+			return a.doPlayTrack(track)
+		}
 	}
 	return nil
 }
@@ -909,6 +1101,14 @@ func (a *App) moveCursorUp() {
 		if a.historyCursor > 0 {
 			a.historyCursor--
 		}
+	case viewPlaylists:
+		if a.playlistCursor > 0 {
+			a.playlistCursor--
+		}
+	case viewPlaylistDetail:
+		if a.plDetailCursor > 0 {
+			a.plDetailCursor--
+		}
 	}
 }
 
@@ -926,6 +1126,14 @@ func (a *App) moveCursorDown() {
 	case viewHistory:
 		if a.historyCursor < len(a.historyEntries)-1 {
 			a.historyCursor++
+		}
+	case viewPlaylists:
+		if a.playlistCursor < len(a.playlists)-1 {
+			a.playlistCursor++
+		}
+	case viewPlaylistDetail:
+		if a.plDetailCursor < len(a.currentPlaylist.Tracks)-1 {
+			a.plDetailCursor++
 		}
 	}
 }
@@ -1001,6 +1209,73 @@ func (a *App) doUpdateYtDlp() tea.Cmd {
 	return func() tea.Msg {
 		output, err := a.facade.UpdateYtDlp(context.Background())
 		return YtDlpUpdateMsg{Output: output, Err: err}
+	}
+}
+
+func (a *App) doLoadPlaylists() tea.Cmd {
+	return func() tea.Msg {
+		playlists, err := a.facade.ListPlaylists(context.Background())
+		return PlaylistsLoadedMsg{Playlists: playlists, Err: err}
+	}
+}
+
+func (a *App) doLoadPlaylistDetail(id int) tea.Cmd {
+	return func() tea.Msg {
+		p, err := a.facade.GetPlaylist(context.Background(), id)
+		return PlaylistDetailMsg{Playlist: p, Err: err}
+	}
+}
+
+func (a *App) doCreatePlaylist(name string) tea.Cmd {
+	return func() tea.Msg {
+		_, err := a.facade.CreatePlaylist(context.Background(), name)
+		if err != nil {
+			return ToastMsg{Text: "Create failed: " + err.Error(), IsErr: true}
+		}
+		// Reload list
+		playlists, _ := a.facade.ListPlaylists(context.Background())
+		return PlaylistsLoadedMsg{Playlists: playlists}
+	}
+}
+
+func (a *App) doPlayPlaylist(id int) tea.Cmd {
+	return func() tea.Msg {
+		err := a.facade.PlayPlaylist(context.Background(), id)
+		if err != nil {
+			return PlaybackErrorMsg{Err: err}
+		}
+		state := a.facade.State()
+		if state.Current != nil {
+			return PlaybackStartedMsg{Track: *state.Current}
+		}
+		return PlaybackStoppedMsg{}
+	}
+}
+
+func (a *App) doDeletePlaylist(id int) tea.Cmd {
+	return func() tea.Msg {
+		err := a.facade.DeletePlaylist(context.Background(), id)
+		if err != nil {
+			return ToastMsg{Text: "Delete failed: " + err.Error(), IsErr: true}
+		}
+		playlists, _ := a.facade.ListPlaylists(context.Background())
+		return PlaylistsLoadedMsg{Playlists: playlists}
+	}
+}
+
+func (a *App) doAddToPlaylist(playlistID int) tea.Cmd {
+	// Add currently playing track to playlist
+	state := a.facade.State()
+	if state.Current == nil {
+		return a.toast.Show("Nothing playing to add", true)
+	}
+	track := *state.Current
+	return func() tea.Msg {
+		err := a.facade.AddToPlaylist(context.Background(), playlistID, track)
+		if err != nil {
+			return ToastMsg{Text: "Add failed: " + err.Error(), IsErr: true}
+		}
+		return ToastMsg{Text: "Added to playlist"}
 	}
 }
 

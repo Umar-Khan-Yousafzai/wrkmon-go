@@ -62,3 +62,15 @@ type YtDlpUpdateMsg struct {
 	Output string
 	Err    error
 }
+
+// PlaylistsLoadedMsg carries loaded playlists.
+type PlaylistsLoadedMsg struct {
+	Playlists []core.Playlist
+	Err       error
+}
+
+// PlaylistDetailMsg carries a playlist with its tracks.
+type PlaylistDetailMsg struct {
+	Playlist core.Playlist
+	Err      error
+}
