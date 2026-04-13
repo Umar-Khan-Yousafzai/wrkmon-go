@@ -175,6 +175,11 @@ func (f *Facade) GetDuration() (float64, error) {
 	return f.player.GetDuration()
 }
 
+// IsPlaying reports whether the player process is still running.
+func (f *Facade) IsPlaying() bool {
+	return f.player.IsRunning()
+}
+
 // State returns current player state.
 func (f *Facade) State() core.PlayerState { return f.state }
 

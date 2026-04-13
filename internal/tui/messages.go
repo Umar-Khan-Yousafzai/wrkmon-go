@@ -26,6 +26,9 @@ type PlaybackStartedMsg struct {
 // PlaybackStoppedMsg signals playback has ended.
 type PlaybackStoppedMsg struct{}
 
+// TrackEndedMsg signals the current track finished naturally (mpv exited).
+type TrackEndedMsg struct{}
+
 // PlaybackErrorMsg signals a playback error.
 type PlaybackErrorMsg struct {
 	Err error

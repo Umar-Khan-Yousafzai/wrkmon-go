@@ -71,6 +71,9 @@ type App struct {
 	currentPos float64
 	currentDur float64
 
+	// Auto-advance: play next track when current ends
+	autoAdvance bool
+
 	// Loading indicator
 	loading     bool
 	loadingText string
@@ -83,12 +86,13 @@ type App struct {
 func NewApp(facade *Facade, themeName string) *App {
 	t := theme.Get(themeName)
 	app := &App{
-		facade:    facade,
-		theme:     t,
-		styles:    t.Styles(),
-		prompt:    components.NewPrompt(t),
-		toast:     components.NewToast(t),
-		statusBar: components.NewStatusBar(t),
+		facade:      facade,
+		theme:       t,
+		styles:      t.Styles(),
+		prompt:      components.NewPrompt(t),
+		toast:       components.NewToast(t),
+		statusBar:   components.NewStatusBar(t),
+		autoAdvance: true,
 	}
 	app.dispatch = app.buildCommands()
 	return app
@@ -103,9 +107,12 @@ func (a *App) buildCommands() *commands.Dispatcher {
 		Handler: func(args string) (string, error) {
 			a.helpText = d.Help() + "\nKeyboard shortcuts:\n" +
 				"  Space          Toggle pause/resume\n" +
+				"  Ctrl+P         Toggle pause (works while typing)\n" +
 				"  Left/Right     Seek -/+ 5 seconds\n" +
 				"  +/-            Volume up/down\n" +
 				"  n/p            Next/previous track\n" +
+				"  a              Add to queue (search view)\n" +
+				"  Tab/Shift+Tab  Cycle views\n" +
 				"  Up/Down        Navigate list\n" +
 				"  Enter          Select/play item\n" +
 				"  Esc            Back to search\n" +
@@ -343,6 +350,50 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.currentView = viewSearch
 			}
 			return a, nil
+		case "tab":
+			if a.prompt.Value() == "" {
+				// Cycle views: search → queue → now playing → history → search
+				switch a.currentView {
+				case viewSearch:
+					a.currentView = viewQueue
+				case viewQueue:
+					a.currentView = viewNowPlaying
+				case viewNowPlaying:
+					a.currentView = viewHistory
+					a.loading = true
+					cmds = append(cmds, a.doLoadHistory())
+				case viewHistory:
+					a.currentView = viewSearch
+				}
+				return a, tea.Batch(cmds...)
+			}
+		case "shift+tab":
+			if a.prompt.Value() == "" {
+				// Reverse cycle
+				switch a.currentView {
+				case viewSearch:
+					a.currentView = viewHistory
+					a.loading = true
+					cmds = append(cmds, a.doLoadHistory())
+				case viewQueue:
+					a.currentView = viewSearch
+				case viewNowPlaying:
+					a.currentView = viewQueue
+				case viewHistory:
+					a.currentView = viewNowPlaying
+				}
+				return a, tea.Batch(cmds...)
+			}
+		case "a":
+			// Add to queue without playing (search view only)
+			if a.prompt.Value() == "" && a.currentView == viewSearch {
+				if a.searchCursor >= 0 && a.searchCursor < len(a.searchResults) {
+					result := a.searchResults[a.searchCursor]
+					track := a.facade.AddToQueue(result)
+					cmds = append(cmds, a.toast.Show("Queued: "+track.Title, false))
+					return a, tea.Batch(cmds...)
+				}
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -401,8 +452,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Duration > 0 {
 			a.currentDur = msg.Duration
 		}
-		if a.facade.State().Status == core.StatusPlaying {
+		if a.facade.State().Status == core.StatusPlaying || a.facade.State().Current != nil {
 			cmds = append(cmds, a.tickPosition())
+		}
+
+	case TrackEndedMsg:
+		// Track finished naturally — auto-advance if enabled
+		if a.autoAdvance {
+			_, hasNext := a.facade.Queue().Next()
+			if hasNext {
+				cmds = append(cmds, a.doPlayFromQueue())
+			} else {
+				// No more tracks — stop
+				a.facade.Stop()
+				a.statusBar.SetState(a.facade.State())
+				a.currentPos = 0
+				a.currentDur = 0
+				cmds = append(cmds, a.toast.Show("Queue finished", false))
+			}
 		}
 
 	case StreamURLMsg:
@@ -499,10 +566,18 @@ func (a *App) renderSearchView() string {
 		if a.loading {
 			return a.styles.Muted.Render("  Searching...")
 		}
-		// Welcome screen.
-		title := a.styles.Title.Render("  wrkmon-go v2.0")
-		hint := a.styles.Muted.Render("  Type to search YouTube, or /help for commands")
-		return title + "\n\n" + hint
+		// Welcome screen with ASCII art.
+		logo := a.styles.Accent.Render(
+			"              _                          \n" +
+				" __      __ _ | | __ _ __   ___  _ __    \n" +
+				" \\ \\ /\\ / /| '__|| |/ /| '_ \\ / _ \\| '_ \\   \n" +
+				"  \\ V  V / | |   |   < | | | | (_) | | | |  \n" +
+				"   \\_/\\_/  |_|   |_|\\_\\|_| |_|\\___/|_| |_|  \n")
+		version := a.styles.Muted.Render("                   v2.0 — Go Edition")
+		hint1 := a.styles.Muted.Render("  Type to search YouTube")
+		hint2 := a.styles.Muted.Render("  /help for commands  •  Tab to switch views")
+		hint3 := a.styles.Muted.Render("  Enter to play  •  a to add to queue")
+		return "\n" + logo + "\n" + version + "\n\n" + hint1 + "\n" + hint2 + "\n" + hint3
 	}
 
 	if a.loading {
@@ -539,7 +614,7 @@ func (a *App) renderSearchView() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(a.styles.Muted.Render("  Enter: add to queue & play | Up/Down: navigate"))
+	b.WriteString(a.styles.Muted.Render("  Enter: play  •  a: add to queue  •  Tab: switch view"))
 
 	return b.String()
 }
@@ -672,7 +747,7 @@ func (a *App) renderNowPlayingView() string {
 	b.WriteString("\n\n")
 
 	// Keyboard shortcuts
-	b.WriteString(a.styles.Muted.Render("  Space: pause  \u2190\u2192: seek  +/-: volume  n/p: next/prev"))
+	b.WriteString(a.styles.Muted.Render("  Space: pause  \u2190\u2192: seek  +/-: vol  n/p: track  Tab: views"))
 
 	return b.String()
 }
@@ -811,6 +886,20 @@ func (a *App) doPlayTrack(track core.Track) tea.Cmd {
 	}
 }
 
+func (a *App) doPlayFromQueue() tea.Cmd {
+	return func() tea.Msg {
+		err := a.facade.PlayFromQueue(context.Background())
+		if err != nil {
+			return PlaybackErrorMsg{Err: err}
+		}
+		state := a.facade.State()
+		if state.Current != nil {
+			return PlaybackStartedMsg{Track: *state.Current}
+		}
+		return PlaybackStoppedMsg{}
+	}
+}
+
 func (a *App) doNextTrack() tea.Cmd {
 	return func() tea.Msg {
 		err := a.facade.NextTrack(context.Background())
@@ -848,6 +937,10 @@ func (a *App) doLoadHistory() tea.Cmd {
 
 func (a *App) tickPosition() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		// Check if mpv process died (track ended naturally)
+		if a.facade.State().Current != nil && !a.facade.IsPlaying() {
+			return TrackEndedMsg{}
+		}
 		pos, _ := a.facade.GetPosition()
 		dur, _ := a.facade.GetDuration()
 		return PositionUpdateMsg{Position: pos, Duration: dur}
