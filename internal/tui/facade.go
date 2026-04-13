@@ -285,6 +285,36 @@ func (f *Facade) PlayPlaylist(ctx context.Context, id int) error {
 	return f.PlayFromQueue(ctx)
 }
 
+// DownloadTrack downloads audio for a track to the given directory.
+func (f *Facade) DownloadTrack(ctx context.Context, videoID, title, channel string, outputDir string) (string, error) {
+	type downloader interface {
+		Download(ctx context.Context, videoID string, outputDir string) (string, error)
+	}
+	d, ok := f.searcher.(downloader)
+	if !ok {
+		return "", fmt.Errorf("searcher does not support downloads")
+	}
+	filePath, err := d.Download(ctx, videoID, outputDir)
+	if err != nil {
+		return "", err
+	}
+	// Record in DB
+	dl := core.Download{
+		VideoID:      videoID,
+		Title:        title,
+		Channel:      channel,
+		FilePath:     filePath,
+		DownloadedAt: time.Now(),
+	}
+	_ = f.store.SaveDownload(ctx, dl)
+	return filePath, nil
+}
+
+// ListDownloads returns recent downloads.
+func (f *Facade) ListDownloads(ctx context.Context, limit int) ([]core.Download, error) {
+	return f.store.ListDownloads(ctx, limit)
+}
+
 // UpdateYtDlp runs yt-dlp self-update if using bundled binary.
 func (f *Facade) UpdateYtDlp(ctx context.Context) (string, error) {
 	type updater interface {
