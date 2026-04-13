@@ -31,9 +31,10 @@ type PlaybackErrorMsg struct {
 	Err error
 }
 
-// PositionUpdateMsg carries current playback position.
+// PositionUpdateMsg carries current playback position and duration.
 type PositionUpdateMsg struct {
 	Position float64
+	Duration float64
 }
 
 // HistoryLoadedMsg carries loaded history entries.

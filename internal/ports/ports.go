@@ -21,6 +21,7 @@ type Player interface {
 	Seek(seconds float64) error
 	SetVolume(vol int) error
 	GetPosition() (float64, error)
+	GetDuration() (float64, error)
 	IsRunning() bool
 	Close() error
 }

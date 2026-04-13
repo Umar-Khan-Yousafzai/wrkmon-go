@@ -67,9 +67,16 @@ type App struct {
 	historyEntries []core.HistoryEntry
 	historyCursor  int
 
+	// Playback position tracking
+	currentPos float64
+	currentDur float64
+
 	// Loading indicator
 	loading     bool
 	loadingText string
+
+	// Help text display
+	helpText string
 }
 
 // NewApp creates the root TUI application.
@@ -94,7 +101,16 @@ func (a *App) buildCommands() *commands.Dispatcher {
 		Name:        "/help",
 		Description: "Show available commands",
 		Handler: func(args string) (string, error) {
-			return d.Help(), nil
+			a.helpText = d.Help() + "\nKeyboard shortcuts:\n" +
+				"  Space          Toggle pause/resume\n" +
+				"  Left/Right     Seek -/+ 5 seconds\n" +
+				"  +/-            Volume up/down\n" +
+				"  n/p            Next/previous track\n" +
+				"  Up/Down        Navigate list\n" +
+				"  Enter          Select/play item\n" +
+				"  Esc            Back to search\n" +
+				"  q              Quit\n"
+			return "", nil
 		},
 	})
 
@@ -250,16 +266,67 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if a.prompt.Value() == "" {
 				return a, tea.Quit
 			}
+		case " ":
+			// Space toggles pause when prompt is empty
+			if a.prompt.Value() == "" {
+				if err := a.facade.TogglePause(); err != nil {
+					cmds = append(cmds, a.toast.Show(err.Error(), true))
+				}
+				a.statusBar.SetState(a.facade.State())
+				return a, tea.Batch(cmds...)
+			}
 		case "ctrl+p":
 			if err := a.facade.TogglePause(); err != nil {
 				cmds = append(cmds, a.toast.Show(err.Error(), true))
 			}
 			a.statusBar.SetState(a.facade.State())
 			return a, tea.Batch(cmds...)
+		case "left":
+			// Seek backward 5s when prompt is empty
+			if a.prompt.Value() == "" {
+				_ = a.facade.Seek(-5)
+				return a, nil
+			}
+		case "right":
+			// Seek forward 5s when prompt is empty
+			if a.prompt.Value() == "" {
+				_ = a.facade.Seek(5)
+				return a, nil
+			}
+		case "+", "=":
+			if a.prompt.Value() == "" {
+				_ = a.facade.VolumeUp()
+				a.statusBar.SetState(a.facade.State())
+				cmds = append(cmds, a.toast.Show(fmt.Sprintf("Volume: %d%%", a.facade.State().Volume), false))
+				return a, tea.Batch(cmds...)
+			}
+		case "-":
+			if a.prompt.Value() == "" {
+				_ = a.facade.VolumeDown()
+				a.statusBar.SetState(a.facade.State())
+				cmds = append(cmds, a.toast.Show(fmt.Sprintf("Volume: %d%%", a.facade.State().Volume), false))
+				return a, tea.Batch(cmds...)
+			}
+		case "n":
+			if a.prompt.Value() == "" {
+				cmds = append(cmds, a.doNextTrack())
+				return a, tea.Batch(cmds...)
+			}
+		case "p":
+			if a.prompt.Value() == "" {
+				cmds = append(cmds, a.doPrevTrack())
+				return a, tea.Batch(cmds...)
+			}
 		case "up":
-			a.moveCursorUp()
+			if a.prompt.Value() == "" {
+				a.moveCursorUp()
+				return a, nil
+			}
 		case "down":
-			a.moveCursorDown()
+			if a.prompt.Value() == "" {
+				a.moveCursorDown()
+				return a, nil
+			}
 		case "enter":
 			if a.prompt.Value() == "" {
 				cmd := a.handleEnterOnList()
@@ -268,6 +335,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return a, tea.Batch(cmds...)
 			}
+		case "esc":
+			// Clear help text or switch to search view
+			if a.helpText != "" {
+				a.helpText = ""
+			} else {
+				a.currentView = viewSearch
+			}
+			return a, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -296,6 +371,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case PlaybackStartedMsg:
+		a.currentPos = 0
+		a.currentDur = msg.Track.Duration.Seconds()
 		a.statusBar.SetState(a.facade.State())
 		cmds = append(cmds, a.toast.Show("Now playing: "+msg.Track.Title, false))
 		cmds = append(cmds, a.tickPosition())
@@ -320,10 +397,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, a.toast.Show(msg.Text, msg.IsErr))
 
 	case PositionUpdateMsg:
-		state := a.facade.State()
-		state.Position = time.Duration(msg.Position * float64(time.Second))
-		// We can't set position on facade directly; use it for display.
-		// Continue ticking if still playing.
+		a.currentPos = msg.Position
+		if msg.Duration > 0 {
+			a.currentDur = msg.Duration
+		}
 		if a.facade.State().Status == core.StatusPlaying {
 			cmds = append(cmds, a.tickPosition())
 		}
@@ -347,6 +424,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Keep status bar in sync.
 	a.statusBar.SetState(a.facade.State())
 	a.statusBar.SetView(a.currentView.String())
+	a.statusBar.SetPosition(a.currentPos, a.currentDur)
 
 	return a, tea.Batch(cmds...)
 }
@@ -391,6 +469,12 @@ func (a *App) View() string {
 
 func (a *App) renderContent(height int) string {
 	var content string
+
+	// Show help overlay if active
+	if a.helpText != "" {
+		content = "\n" + a.styles.Title.Render("  Help") + "\n\n" + a.styles.Muted.Render(a.helpText) + "\n\n" + a.styles.Muted.Render("  Press Esc to close")
+		return lipgloss.NewStyle().Width(a.width).Height(height).Render(content)
+	}
 
 	switch a.currentView {
 	case viewSearch:
@@ -535,52 +619,60 @@ func (a *App) renderHistoryView() string {
 func (a *App) renderNowPlayingView() string {
 	state := a.facade.State()
 	if state.Current == nil {
-		return a.styles.Muted.Render("  Nothing playing.")
+		return a.styles.Muted.Render("  Nothing playing.\n\n  Search for music to get started.")
 	}
 
 	var b strings.Builder
 
+	b.WriteString("\n")
 	title := a.styles.Title.Render("  Now Playing")
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
+	// Track info
 	trackTitle := a.styles.Selected.Render("  " + state.Current.Title)
 	b.WriteString(trackTitle)
 	b.WriteString("\n")
 
-	channel := a.styles.Muted.Render("  " + state.Current.Channel)
-	b.WriteString(channel)
-	b.WriteString("\n\n")
-
-	// Status.
-	status := "\u25b6 Playing"
-	if state.Status == core.StatusPaused {
-		status = "\u23f8 Paused"
+	if state.Current.Channel != "" {
+		channel := a.styles.Muted.Render("  " + state.Current.Channel)
+		b.WriteString(channel)
+		b.WriteString("\n")
 	}
-	b.WriteString("  " + a.styles.Accent.Render(status))
+	b.WriteString("\n")
+
+	// Status icon
+	status := a.styles.Accent.Render("  \u25b6 Playing")
+	if state.Status == core.StatusPaused {
+		status = a.styles.Warning.Render("  \u23f8 Paused")
+	}
+	b.WriteString(status)
 	b.WriteString("\n\n")
 
-	// Progress bar.
-	barWidth := a.width - 4
+	// Progress bar using actual position
+	barWidth := a.width - 6
 	if barWidth < 10 {
 		barWidth = 10
 	}
-	posSec := state.Position.Seconds()
-	durSec := state.Current.Duration.Seconds()
-	bar := progressBar(posSec, durSec, barWidth)
+	bar := progressBar(a.currentPos, a.currentDur, barWidth)
 	b.WriteString("  " + a.styles.Accent.Render(bar))
 	b.WriteString("\n")
 
-	// Time display.
-	posStr := formatSeconds(posSec)
-	durStr := formatDuration(state.Current.Duration)
+	// Time display
+	posStr := formatSeconds(a.currentPos)
+	durStr := formatSeconds(a.currentDur)
 	timeDisplay := a.styles.Muted.Render(fmt.Sprintf("  %s / %s", posStr, durStr))
 	b.WriteString(timeDisplay)
 	b.WriteString("\n\n")
 
-	// Volume.
-	volDisplay := a.styles.Muted.Render(fmt.Sprintf("  Volume: %d%%", state.Volume))
-	b.WriteString(volDisplay)
+	// Volume bar
+	volBar := volumeBar(state.Volume, 20)
+	volDisplay := fmt.Sprintf("  Volume: %s %d%%", volBar, state.Volume)
+	b.WriteString(a.styles.Muted.Render(volDisplay))
+	b.WriteString("\n\n")
+
+	// Keyboard shortcuts
+	b.WriteString(a.styles.Muted.Render("  Space: pause  \u2190\u2192: seek  +/-: volume  n/p: next/prev"))
 
 	return b.String()
 }
@@ -757,7 +849,8 @@ func (a *App) doLoadHistory() tea.Cmd {
 func (a *App) tickPosition() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		pos, _ := a.facade.GetPosition()
-		return PositionUpdateMsg{Position: pos}
+		dur, _ := a.facade.GetDuration()
+		return PositionUpdateMsg{Position: pos, Duration: dur}
 	})
 }
 
@@ -785,6 +878,17 @@ func formatDuration(d time.Duration) string {
 	m := total / 60
 	s := total % 60
 	return fmt.Sprintf("%d:%02d", m, s)
+}
+
+func volumeBar(vol int, width int) string {
+	filled := vol * width / 100
+	if filled > width {
+		filled = width
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	return strings.Repeat("\u2588", filled) + strings.Repeat("\u2591", width-filled)
 }
 
 func formatSeconds(secs float64) string {

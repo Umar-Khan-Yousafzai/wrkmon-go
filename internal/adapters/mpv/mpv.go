@@ -149,6 +149,22 @@ func (m *MPV) GetPosition() (float64, error) {
 	}
 }
 
+// GetDuration returns the total duration of the current track in seconds.
+func (m *MPV) GetDuration() (float64, error) {
+	resp, err := m.command("get_property", "duration")
+	if err != nil {
+		return 0, err
+	}
+	switch v := resp.Data.(type) {
+	case float64:
+		return v, nil
+	case nil:
+		return 0, nil
+	default:
+		return 0, fmt.Errorf("unexpected duration type %T", resp.Data)
+	}
+}
+
 // IsRunning reports whether the mpv process is still alive.
 func (m *MPV) IsRunning() bool {
 	return m.running.Load()

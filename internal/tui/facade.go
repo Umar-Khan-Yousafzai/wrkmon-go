@@ -170,6 +170,11 @@ func (f *Facade) GetPosition() (float64, error) {
 	return f.player.GetPosition()
 }
 
+// GetDuration returns total duration of current track in seconds.
+func (f *Facade) GetDuration() (float64, error) {
+	return f.player.GetDuration()
+}
+
 // State returns current player state.
 func (f *Facade) State() core.PlayerState { return f.state }
 
