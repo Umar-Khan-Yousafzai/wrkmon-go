@@ -37,5 +37,12 @@ type Store interface {
 	LoadQueue(ctx context.Context) ([]core.Track, int, error)
 	CacheSearchResults(ctx context.Context, query string, results []core.SearchResult, ttl time.Duration) error
 	GetCachedSearch(ctx context.Context, query string) ([]core.SearchResult, bool, error)
+	// Playlists
+	CreatePlaylist(ctx context.Context, name string) (core.Playlist, error)
+	ListPlaylists(ctx context.Context) ([]core.Playlist, error)
+	GetPlaylist(ctx context.Context, id int) (core.Playlist, error)
+	DeletePlaylist(ctx context.Context, id int) error
+	AddToPlaylist(ctx context.Context, playlistID int, track core.Track) error
+	RemoveFromPlaylist(ctx context.Context, playlistID int, position int) error
 	Close() error
 }

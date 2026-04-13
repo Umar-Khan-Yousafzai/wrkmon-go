@@ -243,6 +243,48 @@ func (f *Facade) LoadQueueState(ctx context.Context) error {
 	return nil
 }
 
+// CreatePlaylist creates a new playlist.
+func (f *Facade) CreatePlaylist(ctx context.Context, name string) (core.Playlist, error) {
+	return f.store.CreatePlaylist(ctx, name)
+}
+
+// ListPlaylists returns all playlists.
+func (f *Facade) ListPlaylists(ctx context.Context) ([]core.Playlist, error) {
+	return f.store.ListPlaylists(ctx)
+}
+
+// GetPlaylist returns a playlist with tracks.
+func (f *Facade) GetPlaylist(ctx context.Context, id int) (core.Playlist, error) {
+	return f.store.GetPlaylist(ctx, id)
+}
+
+// DeletePlaylist removes a playlist.
+func (f *Facade) DeletePlaylist(ctx context.Context, id int) error {
+	return f.store.DeletePlaylist(ctx, id)
+}
+
+// AddToPlaylist adds a track to a playlist.
+func (f *Facade) AddToPlaylist(ctx context.Context, playlistID int, track core.Track) error {
+	return f.store.AddToPlaylist(ctx, playlistID, track)
+}
+
+// PlayPlaylist loads all tracks from a playlist into the queue and starts playing.
+func (f *Facade) PlayPlaylist(ctx context.Context, id int) error {
+	p, err := f.store.GetPlaylist(ctx, id)
+	if err != nil {
+		return err
+	}
+	if len(p.Tracks) == 0 {
+		return fmt.Errorf("playlist %q is empty", p.Name)
+	}
+	f.queue.Clear()
+	for _, t := range p.Tracks {
+		t.ID = uuid.New().String()
+		f.queue.Add(t)
+	}
+	return f.PlayFromQueue(ctx)
+}
+
 // UpdateYtDlp runs yt-dlp self-update if using bundled binary.
 func (f *Facade) UpdateYtDlp(ctx context.Context) (string, error) {
 	type updater interface {
