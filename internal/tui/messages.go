@@ -56,3 +56,9 @@ type ToastMsg struct {
 type ViewChangeMsg struct {
 	View string // "search", "queue", "history", "nowplaying"
 }
+
+// YtDlpUpdateMsg carries the result of a yt-dlp update.
+type YtDlpUpdateMsg struct {
+	Output string
+	Err    error
+}

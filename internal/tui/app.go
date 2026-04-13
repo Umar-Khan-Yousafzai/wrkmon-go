@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/config"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/commands"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/components"
@@ -49,6 +50,7 @@ type App struct {
 	statusBar components.StatusBar
 	theme    theme.Theme
 	styles   theme.Styles
+	cfg      config.Config
 
 	// View state
 	currentView activeView
@@ -83,10 +85,11 @@ type App struct {
 }
 
 // NewApp creates the root TUI application.
-func NewApp(facade *Facade, themeName string) *App {
-	t := theme.Get(themeName)
+func NewApp(facade *Facade, cfg config.Config) *App {
+	t := theme.Get(cfg.Theme)
 	app := &App{
 		facade:      facade,
+		cfg:         cfg,
 		theme:       t,
 		styles:      t.Styles(),
 		prompt:      components.NewPrompt(t),
@@ -197,6 +200,8 @@ func (a *App) buildCommands() *commands.Dispatcher {
 			if err := a.facade.SetVolume(vol); err != nil {
 				return "", err
 			}
+			a.cfg.Volume = a.facade.State().Volume
+			_ = config.Save(a.cfg)
 			return fmt.Sprintf("Volume: %d%%", vol), nil
 		},
 	})
@@ -214,7 +219,10 @@ func (a *App) buildCommands() *commands.Dispatcher {
 			a.prompt = components.NewPrompt(a.theme)
 			a.toast = components.NewToast(a.theme)
 			a.statusBar = components.NewStatusBar(a.theme)
-			return fmt.Sprintf("Theme: %s", a.theme.Name), nil
+			// Persist theme choice
+			a.cfg.Theme = a.theme.Name
+			_ = config.Save(a.cfg)
+			return fmt.Sprintf("Theme: %s (saved)", a.theme.Name), nil
 		},
 	})
 
@@ -239,6 +247,45 @@ func (a *App) buildCommands() *commands.Dispatcher {
 		},
 	})
 
+	d.Register(commands.Command{
+		Name:        "/repeat",
+		Description: "Cycle repeat mode (off → all → one)",
+		Handler: func(args string) (string, error) {
+			q := a.facade.Queue()
+			switch q.Repeat {
+			case core.RepeatOff:
+				q.Repeat = core.RepeatAll
+			case core.RepeatAll:
+				q.Repeat = core.RepeatOne
+			case core.RepeatOne:
+				q.Repeat = core.RepeatOff
+			}
+			return fmt.Sprintf("Repeat: %s", q.Repeat), nil
+		},
+	})
+
+	d.Register(commands.Command{
+		Name:        "/shuffle",
+		Description: "Toggle shuffle mode",
+		Handler: func(args string) (string, error) {
+			q := a.facade.Queue()
+			q.Shuffle = !q.Shuffle
+			mode := "off"
+			if q.Shuffle {
+				mode = "on"
+			}
+			return fmt.Sprintf("Shuffle: %s", mode), nil
+		},
+	})
+
+	d.Register(commands.Command{
+		Name:        "/update-ytdlp",
+		Description: "Update bundled yt-dlp",
+		Handler: func(args string) (string, error) {
+			return "UPDATE_YTDLP", nil
+		},
+	})
+
 	// Reserve v2.x namespaces (hidden)
 	for _, ns := range []string{"/playlist", "/lyrics", "/download", "/eq", "/focus", "/sleep"} {
 		name := ns
@@ -257,6 +304,10 @@ func (a *App) buildCommands() *commands.Dispatcher {
 
 // Init implements tea.Model.
 func (a *App) Init() tea.Cmd {
+	// Apply saved volume
+	if a.cfg.Volume > 0 {
+		_ = a.facade.SetVolume(a.cfg.Volume)
+	}
 	return textinput.Blink
 }
 
@@ -472,6 +523,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case YtDlpUpdateMsg:
+		a.loading = false
+		if msg.Err != nil {
+			cmds = append(cmds, a.toast.Show("yt-dlp update failed: "+msg.Err.Error(), true))
+		} else {
+			cmds = append(cmds, a.toast.Show("yt-dlp: "+msg.Output, false))
+		}
+
 	case StreamURLMsg:
 		// Handled by PlayTrack in facade; this msg type exists for future use.
 	}
@@ -492,6 +551,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	a.statusBar.SetState(a.facade.State())
 	a.statusBar.SetView(a.currentView.String())
 	a.statusBar.SetPosition(a.currentPos, a.currentDur)
+	q := a.facade.Queue()
+	a.statusBar.SetRepeatShuffle(q.Repeat.String(), q.Shuffle)
 
 	return a, tea.Batch(cmds...)
 }
@@ -775,6 +836,8 @@ func (a *App) handleSubmit(input string) tea.Cmd {
 			return a.doNextTrack()
 		case result == "PREV_TRACK":
 			return a.doPrevTrack()
+		case result == "UPDATE_YTDLP":
+			return a.doUpdateYtDlp()
 		case strings.HasPrefix(result, "SEARCH:"):
 			query := strings.TrimPrefix(result, "SEARCH:")
 			a.searchQuery = query
@@ -870,8 +933,12 @@ func (a *App) moveCursorDown() {
 // --- Tea commands ---
 
 func (a *App) doSearch(query string) tea.Cmd {
+	limit := a.cfg.ResultsPerPage
+	if limit <= 0 {
+		limit = 10
+	}
 	return func() tea.Msg {
-		results, err := a.facade.Search(context.Background(), query, 10)
+		results, err := a.facade.Search(context.Background(), query, limit)
 		return SearchResultMsg{Results: results, Query: query, Err: err}
 	}
 }
@@ -925,6 +992,15 @@ func (a *App) doPrevTrack() tea.Cmd {
 			return PlaybackStartedMsg{Track: *state.Current}
 		}
 		return PlaybackStoppedMsg{}
+	}
+}
+
+func (a *App) doUpdateYtDlp() tea.Cmd {
+	a.loading = true
+	a.loadingText = "Updating yt-dlp..."
+	return func() tea.Msg {
+		output, err := a.facade.UpdateYtDlp(context.Background())
+		return YtDlpUpdateMsg{Output: output, Err: err}
 	}
 }
 

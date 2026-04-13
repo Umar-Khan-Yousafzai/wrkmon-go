@@ -20,18 +20,36 @@ var _ ports.Searcher = (*Client)(nil)
 // Client wraps yt-dlp subprocess calls.
 type Client struct {
 	binPath string // path to yt-dlp binary
+	bundled bool   // whether using the bundled binary
 }
 
-// NewClient creates a yt-dlp client. If binPath is empty, it looks for "yt-dlp" on PATH.
-func NewClient(binPath string) (*Client, error) {
-	if binPath == "" {
-		binPath = "yt-dlp"
-	}
-	path, err := exec.LookPath(binPath)
+// NewClient creates a yt-dlp client using the locator precedence rule.
+func NewClient(configPath string) (*Client, error) {
+	result, err := Locate(configPath)
 	if err != nil {
-		return nil, fmt.Errorf("yt-dlp not found: %w", err)
+		return nil, err
 	}
-	return &Client{binPath: path}, nil
+	return &Client{binPath: result.Path, bundled: result.Bundled}, nil
+}
+
+// BinPath returns the resolved yt-dlp binary path.
+func (c *Client) BinPath() string { return c.binPath }
+
+// IsBundled reports whether the active binary is the bundled one.
+func (c *Client) IsBundled() bool { return c.bundled }
+
+// Update runs yt-dlp -U to self-update the binary.
+// Returns the output from yt-dlp.
+func (c *Client) Update(ctx context.Context) (string, error) {
+	if !c.bundled {
+		return "System yt-dlp can't self-update — use your package manager", nil
+	}
+	cmd := exec.CommandContext(ctx, c.binPath, "-U")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(output), fmt.Errorf("yt-dlp update failed: %w", err)
+	}
+	return strings.TrimSpace(string(output)), nil
 }
 
 // searchResult is the JSON shape yt-dlp emits per entry in flat-playlist mode.

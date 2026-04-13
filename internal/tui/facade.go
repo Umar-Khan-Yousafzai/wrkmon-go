@@ -33,9 +33,25 @@ func NewFacade(searcher ports.Searcher, player ports.Player, store ports.Store) 
 	}
 }
 
-// Search performs a YouTube search.
+// Search performs a YouTube search, using cache when available.
 func (f *Facade) Search(ctx context.Context, query string, limit int) ([]core.SearchResult, error) {
-	return f.searcher.Search(ctx, query, limit)
+	// Check cache first
+	if cached, ok, _ := f.store.GetCachedSearch(ctx, query); ok && len(cached) > 0 {
+		if len(cached) > limit {
+			cached = cached[:limit]
+		}
+		return cached, nil
+	}
+
+	results, err := f.searcher.Search(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache results for 1 hour (best-effort)
+	_ = f.store.CacheSearchResults(ctx, query, results, time.Hour)
+
+	return results, nil
 }
 
 // PlayTrack resolves the stream URL and starts playback.
@@ -180,6 +196,15 @@ func (f *Facade) IsPlaying() bool {
 	return f.player.IsRunning()
 }
 
+// Respawn attempts to restart the player with the last played URL.
+func (f *Facade) Respawn() error {
+	if err := f.player.Respawn(); err != nil {
+		return err
+	}
+	f.state.Status = core.StatusPlaying
+	return nil
+}
+
 // State returns current player state.
 func (f *Facade) State() core.PlayerState { return f.state }
 
@@ -216,6 +241,17 @@ func (f *Facade) LoadQueueState(ctx context.Context) error {
 		f.queue.Next()
 	}
 	return nil
+}
+
+// UpdateYtDlp runs yt-dlp self-update if using bundled binary.
+func (f *Facade) UpdateYtDlp(ctx context.Context) (string, error) {
+	type updater interface {
+		Update(ctx context.Context) (string, error)
+	}
+	if u, ok := f.searcher.(updater); ok {
+		return u.Update(ctx)
+	}
+	return "yt-dlp update not supported with this searcher", nil
 }
 
 // Close shuts down all adapters.

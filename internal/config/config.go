@@ -9,17 +9,19 @@ import (
 
 // Config holds application configuration.
 type Config struct {
-	Theme     string `toml:"theme"`
-	Volume    int    `toml:"volume"`
-	YtDlpPath string `toml:"ytdlp_path"`
-	MpvPath   string `toml:"mpv_path"`
+	Theme          string `toml:"theme"`
+	Volume         int    `toml:"volume"`
+	YtDlpPath      string `toml:"ytdlp_path"`
+	MpvPath        string `toml:"mpv_path"`
+	ResultsPerPage int    `toml:"results_per_page"`
 }
 
 // DefaultConfig returns sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		Theme:  "opencode-mono",
-		Volume: 50,
+		Theme:          "opencode-mono",
+		Volume:         50,
+		ResultsPerPage: 10,
 	}
 }
 

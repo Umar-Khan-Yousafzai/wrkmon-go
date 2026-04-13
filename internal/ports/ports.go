@@ -2,6 +2,7 @@ package ports
 
 import (
 	"context"
+	"time"
 
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
 )
@@ -23,6 +24,7 @@ type Player interface {
 	GetPosition() (float64, error)
 	GetDuration() (float64, error)
 	IsRunning() bool
+	Respawn() error
 	Close() error
 }
 
@@ -33,5 +35,7 @@ type Store interface {
 	SearchHistory(ctx context.Context, query string, limit int) ([]core.HistoryEntry, error)
 	SaveQueue(ctx context.Context, tracks []core.Track, cursor int) error
 	LoadQueue(ctx context.Context) ([]core.Track, int, error)
+	CacheSearchResults(ctx context.Context, query string, results []core.SearchResult, ttl time.Duration) error
+	GetCachedSearch(ctx context.Context, query string) ([]core.SearchResult, bool, error)
 	Close() error
 }

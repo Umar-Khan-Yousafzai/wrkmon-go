@@ -1,9 +1,33 @@
 package core
 
+import "math/rand"
+
+// RepeatMode controls what happens when the queue reaches the end.
+type RepeatMode int
+
+const (
+	RepeatOff RepeatMode = iota // stop at end
+	RepeatAll                   // loop back to start
+	RepeatOne                   // replay current track
+)
+
+func (r RepeatMode) String() string {
+	switch r {
+	case RepeatAll:
+		return "all"
+	case RepeatOne:
+		return "one"
+	default:
+		return "off"
+	}
+}
+
 // Queue manages an ordered playlist of tracks.
 type Queue struct {
-	tracks []Track
-	cursor int // index of currently playing track, -1 if empty
+	tracks  []Track
+	cursor  int // index of currently playing track, -1 if empty
+	Repeat  RepeatMode
+	Shuffle bool
 }
 
 // NewQueue creates an empty queue.
@@ -59,9 +83,26 @@ func (q *Queue) Current() (Track, bool) {
 }
 
 // Next advances the cursor and returns the next track.
-// Returns false if already at the end.
+// Behavior depends on repeat/shuffle mode.
 func (q *Queue) Next() (Track, bool) {
+	if len(q.tracks) == 0 {
+		return Track{}, false
+	}
+
+	if q.Repeat == RepeatOne {
+		return q.tracks[q.cursor], true
+	}
+
+	if q.Shuffle {
+		q.cursor = rand.Intn(len(q.tracks))
+		return q.tracks[q.cursor], true
+	}
+
 	if q.cursor+1 >= len(q.tracks) {
+		if q.Repeat == RepeatAll {
+			q.cursor = 0
+			return q.tracks[q.cursor], true
+		}
 		return Track{}, false
 	}
 	q.cursor++

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/mpv"
@@ -25,6 +26,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Check mpv is available.
+	mpvBin := "mpv"
+	if cfg.MpvPath != "" {
+		mpvBin = cfg.MpvPath
+	}
+	if _, err := exec.LookPath(mpvBin); err != nil {
+		fmt.Fprintf(os.Stderr, "mpv not found: %v\nInstall mpv:\n  Ubuntu/Debian: sudo apt install mpv\n  macOS: brew install mpv\n  Windows: winget install mpv\n", err)
+		os.Exit(1)
+	}
+
 	player := mpv.New()
 
 	dbPath := config.DBPath()
@@ -39,7 +50,7 @@ func main() {
 	facade := tui.NewFacade(searcher, player, storage)
 	defer facade.Close()
 
-	app := tui.NewApp(facade, cfg.Theme)
+	app := tui.NewApp(facade, cfg)
 
 	// Ensure data directory exists.
 	os.MkdirAll(config.DataDir(), 0o755)

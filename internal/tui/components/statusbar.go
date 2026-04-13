@@ -11,12 +11,14 @@ import (
 
 // StatusBar shows playback information at the bottom.
 type StatusBar struct {
-	state    core.PlayerState
-	view     string
-	styles   theme.Styles
-	width    int
-	position float64
-	duration float64
+	state      core.PlayerState
+	view       string
+	styles     theme.Styles
+	width      int
+	position   float64
+	duration   float64
+	repeatMode string
+	shuffle    bool
 }
 
 // NewStatusBar creates a status bar.
@@ -48,6 +50,12 @@ func (s *StatusBar) SetPosition(pos, dur float64) {
 	s.duration = dur
 }
 
+// SetRepeatShuffle updates repeat/shuffle indicators.
+func (s *StatusBar) SetRepeatShuffle(repeat string, shuffle bool) {
+	s.repeatMode = repeat
+	s.shuffle = shuffle
+}
+
 // View renders the status bar.
 func (s StatusBar) View() string {
 	if s.width <= 0 {
@@ -67,7 +75,16 @@ func (s StatusBar) View() string {
 		left = " \u25a0 Stopped"
 	}
 
-	right := fmt.Sprintf("Vol: %d%% \u2502 %s ", s.state.Volume, s.view)
+	// Build mode indicators
+	modes := ""
+	if s.repeatMode != "" && s.repeatMode != "off" {
+		modes += " \u21bb" + s.repeatMode
+	}
+	if s.shuffle {
+		modes += " \u21c4"
+	}
+
+	right := fmt.Sprintf("Vol: %d%%%s \u2502 %s ", s.state.Volume, modes, s.view)
 
 	// Mini progress bar between left and right
 	gap := s.width - lipgloss.Width(left) - lipgloss.Width(right) - 2

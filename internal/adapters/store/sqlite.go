@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -74,6 +75,13 @@ func (s *SQLiteStore) migrate() error {
 	CREATE TABLE IF NOT EXISTS queue_state (
 		key   TEXT PRIMARY KEY,
 		value TEXT NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS search_cache (
+		query        TEXT NOT NULL,
+		results_json TEXT NOT NULL,
+		expires_at   INTEGER NOT NULL,
+		PRIMARY KEY (query)
 	);
 	`
 	_, err := s.db.Exec(schema)
@@ -253,6 +261,42 @@ func (s *SQLiteStore) LoadQueue(ctx context.Context) ([]core.Track, int, error) 
 	}
 
 	return tracks, cursor, nil
+}
+
+// CacheSearchResults stores search results with a TTL.
+func (s *SQLiteStore) CacheSearchResults(ctx context.Context, query string, results []core.SearchResult, ttl time.Duration) error {
+	data, err := json.Marshal(results)
+	if err != nil {
+		return err
+	}
+	expiresAt := time.Now().Add(ttl).Unix()
+	_, err = s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO search_cache (query, results_json, expires_at) VALUES (?, ?, ?)`,
+		query, string(data), expiresAt,
+	)
+	return err
+}
+
+// GetCachedSearch returns cached search results if they exist and haven't expired.
+func (s *SQLiteStore) GetCachedSearch(ctx context.Context, query string) ([]core.SearchResult, bool, error) {
+	var resultsJSON string
+	var expiresAt int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT results_json, expires_at FROM search_cache WHERE query = ?`, query,
+	).Scan(&resultsJSON, &expiresAt)
+	if err != nil {
+		return nil, false, nil // not found = cache miss, not an error
+	}
+	if time.Now().Unix() > expiresAt {
+		// Expired — clean up
+		s.db.ExecContext(ctx, `DELETE FROM search_cache WHERE query = ?`, query)
+		return nil, false, nil
+	}
+	var results []core.SearchResult
+	if err := json.Unmarshal([]byte(resultsJSON), &results); err != nil {
+		return nil, false, nil // corrupted cache = miss
+	}
+	return results, true, nil
 }
 
 // Close closes the underlying database connection.

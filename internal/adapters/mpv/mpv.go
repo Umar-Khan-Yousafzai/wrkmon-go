@@ -27,6 +27,8 @@ type MPV struct {
 	mu       sync.Mutex
 	reqID    atomic.Int64
 	running  atomic.Bool
+	lastURL  string // stored for respawn on crash
+	lastVol  int    // stored for respawn on crash
 }
 
 // ipcRequest is the JSON-IPC command format mpv expects.
@@ -91,6 +93,7 @@ func (m *MPV) Play(url string) error {
 	m.mu.Lock()
 	m.conn = conn
 	m.reader = bufio.NewReader(conn)
+	m.lastURL = url
 	m.mu.Unlock()
 
 	// Watch for process exit in the background.
@@ -98,6 +101,30 @@ func (m *MPV) Play(url string) error {
 		cmd.Wait()
 		m.running.Store(false)
 	}()
+
+	return nil
+}
+
+// Respawn attempts to restart mpv with the last played URL.
+// Returns an error if no URL was previously played or if respawn fails.
+func (m *MPV) Respawn() error {
+	m.mu.Lock()
+	url := m.lastURL
+	vol := m.lastVol
+	m.mu.Unlock()
+
+	if url == "" {
+		return fmt.Errorf("no previous URL to respawn")
+	}
+
+	if err := m.Play(url); err != nil {
+		return fmt.Errorf("respawn failed: %w", err)
+	}
+
+	// Restore volume
+	if vol > 0 {
+		m.command("set_property", "volume", float64(vol))
+	}
 
 	return nil
 }
@@ -130,6 +157,11 @@ func (m *MPV) Seek(seconds float64) error {
 // SetVolume sets the playback volume (0–100).
 func (m *MPV) SetVolume(vol int) error {
 	_, err := m.command("set_property", "volume", float64(vol))
+	if err == nil {
+		m.mu.Lock()
+		m.lastVol = vol
+		m.mu.Unlock()
+	}
 	return err
 }
 
