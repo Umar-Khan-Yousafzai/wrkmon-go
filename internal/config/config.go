@@ -14,6 +14,7 @@ type Config struct {
 	YtDlpPath      string `toml:"ytdlp_path"`
 	MpvPath        string `toml:"mpv_path"`
 	ResultsPerPage int    `toml:"results_per_page"`
+	DownloadDir    string `toml:"download_dir"`
 }
 
 // DefaultConfig returns sensible defaults.
@@ -72,4 +73,13 @@ func DataDir() string {
 // DBPath returns the full database path.
 func DBPath() string {
 	return filepath.Join(DataDir(), "wrkmon.db")
+}
+
+// DownloadDir returns the download directory, defaulting to ~/Music/wrkmon-go/.
+func DownloadDir(cfg Config) string {
+	if cfg.DownloadDir != "" {
+		return cfg.DownloadDir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, "Music", "wrkmon-go")
 }

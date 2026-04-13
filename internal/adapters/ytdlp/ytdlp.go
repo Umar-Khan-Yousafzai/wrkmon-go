@@ -152,3 +152,37 @@ func (c *Client) GetStreamURL(ctx context.Context, videoID string) (string, erro
 
 	return streamURL, nil
 }
+
+// Download downloads audio for a video to the given directory.
+// Returns the output file path.
+func (c *Client) Download(ctx context.Context, videoID string, outputDir string) (string, error) {
+	url := "https://www.youtube.com/watch?v=" + videoID
+
+	// Use output template to get predictable filename
+	outputTmpl := outputDir + "/%(title)s.%(ext)s"
+
+	cmd := exec.CommandContext(ctx, c.binPath,
+		"-f", "bestaudio",
+		"--extract-audio",
+		"--audio-format", "mp3",
+		"--audio-quality", "0",
+		"-o", outputTmpl,
+		"--no-warnings",
+		"--print", "after_move:filepath",
+		url,
+	)
+
+	output, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return "", fmt.Errorf("yt-dlp download: %w", err)
+	}
+
+	filePath := strings.TrimSpace(string(output))
+	if filePath == "" {
+		return "", fmt.Errorf("yt-dlp returned empty file path")
+	}
+	return filePath, nil
+}

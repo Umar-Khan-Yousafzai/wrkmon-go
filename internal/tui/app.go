@@ -26,6 +26,7 @@ const (
 	viewNowPlaying
 	viewPlaylists
 	viewPlaylistDetail
+	viewDownloads
 )
 
 func (v activeView) String() string {
@@ -42,6 +43,8 @@ func (v activeView) String() string {
 		return "playlists"
 	case viewPlaylistDetail:
 		return "playlist"
+	case viewDownloads:
+		return "downloads"
 	default:
 		return "unknown"
 	}
@@ -80,6 +83,10 @@ type App struct {
 	playlistCursor  int
 	currentPlaylist core.Playlist
 	plDetailCursor  int
+
+	// Downloads state
+	downloads      []core.Download
+	downloadCursor int
 
 	// Playback position tracking
 	currentPos float64
@@ -339,6 +346,24 @@ func (a *App) buildCommands() *commands.Dispatcher {
 			default:
 				return "", fmt.Errorf("unknown: /playlist %s. Use create|play|delete|add", sub)
 			}
+		},
+	})
+
+	d.Register(commands.Command{
+		Name:        "/download",
+		Description: "Download current track as MP3, or /download list",
+		Handler: func(args string) (string, error) {
+			args = strings.TrimSpace(args)
+			if args == "list" {
+				a.currentView = viewDownloads
+				return "LOAD_DOWNLOADS", nil
+			}
+			// Download currently playing track
+			state := a.facade.State()
+			if state.Current == nil {
+				return "", fmt.Errorf("nothing playing to download")
+			}
+			return "DOWNLOAD:" + state.Current.VideoID + "|" + state.Current.Title + "|" + state.Current.Channel, nil
 		},
 	})
 
@@ -614,6 +639,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.currentView = viewPlaylistDetail
 		}
 
+	case DownloadCompleteMsg:
+		a.loading = false
+		if msg.Err != nil {
+			cmds = append(cmds, a.toast.Show("Download failed: "+msg.Err.Error(), true))
+		} else {
+			cmds = append(cmds, a.toast.Show("Downloaded: "+msg.Title, false))
+		}
+
+	case DownloadsLoadedMsg:
+		a.loading = false
+		if msg.Err != nil {
+			cmds = append(cmds, a.toast.Show(msg.Err.Error(), true))
+		} else {
+			a.downloads = msg.Downloads
+			a.downloadCursor = 0
+		}
+
 	case StreamURLMsg:
 		// Handled by PlayTrack in facade; this msg type exists for future use.
 	}
@@ -700,6 +742,8 @@ func (a *App) renderContent(height int) string {
 		content = a.renderPlaylistsView()
 	case viewPlaylistDetail:
 		content = a.renderPlaylistDetailView()
+	case viewDownloads:
+		content = a.renderDownloadsView()
 	}
 
 	// Pad or truncate to fill content area.
@@ -900,6 +944,34 @@ func (a *App) renderNowPlayingView() string {
 	return b.String()
 }
 
+func (a *App) renderDownloadsView() string {
+	if len(a.downloads) == 0 {
+		return a.styles.Muted.Render("  No downloads yet.\n\n  Play a track, then /download to save it as MP3.")
+	}
+
+	var b strings.Builder
+	header := a.styles.Title.Render(fmt.Sprintf("  Downloads (%d)", len(a.downloads)))
+	b.WriteString(header)
+	b.WriteString("\n\n")
+
+	for i, d := range a.downloads {
+		cursor := "  "
+		if i == a.downloadCursor {
+			cursor = a.styles.Accent.Render("> ")
+		}
+		num := a.styles.Muted.Render(fmt.Sprintf("%2d. ", i+1))
+		title := d.Title
+		if i == a.downloadCursor {
+			title = a.styles.Selected.Render(title)
+		}
+		channel := a.styles.Muted.Render(" - " + d.Channel)
+		ago := a.styles.Muted.Render(" (" + timeAgo(d.DownloadedAt) + ")")
+		b.WriteString(cursor + num + title + channel + ago + "\n")
+	}
+
+	return b.String()
+}
+
 func (a *App) renderPlaylistsView() string {
 	if len(a.playlists) == 0 {
 		return a.styles.Muted.Render("  No playlists yet.\n\n  /playlist create <name> to create one.")
@@ -990,6 +1062,13 @@ func (a *App) handleSubmit(input string) tea.Cmd {
 			return a.doPrevTrack()
 		case result == "UPDATE_YTDLP":
 			return a.doUpdateYtDlp()
+		case result == "LOAD_DOWNLOADS":
+			return a.doLoadDownloads()
+		case strings.HasPrefix(result, "DOWNLOAD:"):
+			parts := strings.SplitN(strings.TrimPrefix(result, "DOWNLOAD:"), "|", 3)
+			if len(parts) == 3 {
+				return a.doDownloadTrack(parts[0], parts[1], parts[2])
+			}
 		case result == "LOAD_PLAYLISTS":
 			return a.doLoadPlaylists()
 		case strings.HasPrefix(result, "PL_CREATE:"):
@@ -1209,6 +1288,23 @@ func (a *App) doUpdateYtDlp() tea.Cmd {
 	return func() tea.Msg {
 		output, err := a.facade.UpdateYtDlp(context.Background())
 		return YtDlpUpdateMsg{Output: output, Err: err}
+	}
+}
+
+func (a *App) doDownloadTrack(videoID, title, channel string) tea.Cmd {
+	a.loading = true
+	a.loadingText = "Downloading..."
+	outputDir := config.DownloadDir(a.cfg)
+	return func() tea.Msg {
+		filePath, err := a.facade.DownloadTrack(context.Background(), videoID, title, channel, outputDir)
+		return DownloadCompleteMsg{Title: title, FilePath: filePath, Err: err}
+	}
+}
+
+func (a *App) doLoadDownloads() tea.Cmd {
+	return func() tea.Msg {
+		downloads, err := a.facade.ListDownloads(context.Background(), 50)
+		return DownloadsLoadedMsg{Downloads: downloads, Err: err}
 	}
 }
 

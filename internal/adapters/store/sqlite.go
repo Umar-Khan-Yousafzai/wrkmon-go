@@ -101,6 +101,16 @@ func (s *SQLiteStore) migrate() error {
 		added_at    TEXT NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_playlist_items_pid ON playlist_items(playlist_id, position);
+
+	CREATE TABLE IF NOT EXISTS downloads (
+		id            INTEGER PRIMARY KEY AUTOINCREMENT,
+		video_id      TEXT NOT NULL,
+		title         TEXT NOT NULL,
+		channel       TEXT NOT NULL DEFAULT '',
+		file_path     TEXT NOT NULL,
+		file_size     INTEGER NOT NULL DEFAULT 0,
+		downloaded_at TEXT NOT NULL
+	);
 	`
 	_, err := s.db.Exec(schema)
 	return err
@@ -315,6 +325,40 @@ func (s *SQLiteStore) GetCachedSearch(ctx context.Context, query string) ([]core
 		return nil, false, nil // corrupted cache = miss
 	}
 	return results, true, nil
+}
+
+// SaveDownload records a completed download.
+func (s *SQLiteStore) SaveDownload(ctx context.Context, dl core.Download) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT INTO downloads (video_id, title, channel, file_path, file_size, downloaded_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		dl.VideoID, dl.Title, dl.Channel, dl.FilePath, dl.FileSize,
+		dl.DownloadedAt.Format(time.RFC3339),
+	)
+	return err
+}
+
+// ListDownloads returns recent downloads.
+func (s *SQLiteStore) ListDownloads(ctx context.Context, limit int) ([]core.Download, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, video_id, title, channel, file_path, file_size, downloaded_at
+		 FROM downloads ORDER BY downloaded_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var downloads []core.Download
+	for rows.Next() {
+		var d core.Download
+		var dlAt string
+		if err := rows.Scan(&d.ID, &d.VideoID, &d.Title, &d.Channel, &d.FilePath, &d.FileSize, &dlAt); err != nil {
+			return nil, err
+		}
+		d.DownloadedAt, _ = time.Parse(time.RFC3339, dlAt)
+		downloads = append(downloads, d)
+	}
+	return downloads, rows.Err()
 }
 
 // CreatePlaylist creates a new playlist. Returns error if name already exists.

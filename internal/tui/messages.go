@@ -74,3 +74,16 @@ type PlaylistDetailMsg struct {
 	Playlist core.Playlist
 	Err      error
 }
+
+// DownloadCompleteMsg signals a download finished.
+type DownloadCompleteMsg struct {
+	Title    string
+	FilePath string
+	Err      error
+}
+
+// DownloadsLoadedMsg carries list of downloads.
+type DownloadsLoadedMsg struct {
+	Downloads []core.Download
+	Err       error
+}
