@@ -52,8 +52,119 @@ jobs:
           name: wrkmon-go-${{ matrix.goos }}-${{ matrix.goarch }}
           path: wrkmon-go-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
 
-  release:
+  package-deb:
     needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wrkmon-go-linux-${{ matrix.goarch }}
+      - name: Build .deb package
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          DEB_ARCH="${{ matrix.goarch }}"
+          if [ "$DEB_ARCH" = "amd64" ]; then DEB_ARCH="amd64"; fi
+          if [ "$DEB_ARCH" = "arm64" ]; then DEB_ARCH="arm64"; fi
+
+          PKG_DIR="wrkmon-go_${VERSION}_${DEB_ARCH}"
+          mkdir -p "${PKG_DIR}/DEBIAN"
+          mkdir -p "${PKG_DIR}/usr/local/bin"
+
+          cp wrkmon-go-linux-${{ matrix.goarch }} "${PKG_DIR}/usr/local/bin/wrkmon-go"
+          chmod 755 "${PKG_DIR}/usr/local/bin/wrkmon-go"
+
+          cat > "${PKG_DIR}/DEBIAN/control" <<CTRL
+          Package: wrkmon-go
+          Version: ${VERSION}
+          Architecture: ${DEB_ARCH}
+          Maintainer: Umar Khan <43144366+Umar-Khan-Yousafzai@users.noreply.github.com>
+          Description: TUI YouTube audio player
+           A terminal-based YouTube audio player built with Go and Bubble Tea.
+           Search YouTube, manage queues, and play audio — all from your terminal.
+          Depends: mpv, yt-dlp | python3-yt-dlp
+          Homepage: https://github.com/Umar-Khan-Yousafzai/wrkmon-go
+          Section: sound
+          Priority: optional
+          CTRL
+          # Fix indentation (control file requires no leading spaces on field names)
+          sed -i 's/^          //' "${PKG_DIR}/DEBIAN/control"
+
+          dpkg-deb --build "${PKG_DIR}"
+          mv "${PKG_DIR}.deb" "wrkmon-go_${VERSION}_${DEB_ARCH}.deb"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wrkmon-go-deb-${{ matrix.goarch }}
+          path: "*.deb"
+
+  package-tar:
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wrkmon-go-${{ matrix.goos }}-${{ matrix.goarch }}
+      - name: Create tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          BINARY="wrkmon-go-${{ matrix.goos }}-${{ matrix.goarch }}"
+          TARNAME="wrkmon-go_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}"
+
+          mkdir -p "${TARNAME}"
+          cp "${BINARY}" "${TARNAME}/wrkmon-go"
+          chmod 755 "${TARNAME}/wrkmon-go"
+          cp scripts/install.sh "${TARNAME}/" 2>/dev/null || true
+          cp scripts/uninstall.sh "${TARNAME}/" 2>/dev/null || true
+          cp README.md "${TARNAME}/" 2>/dev/null || true
+
+          tar czf "${TARNAME}.tar.gz" "${TARNAME}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wrkmon-go-tar-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: "*.tar.gz"
+
+  package-zip:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: wrkmon-go-windows-amd64
+      - name: Create Windows zip
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ZIPNAME="wrkmon-go_${VERSION}_windows_amd64"
+
+          mkdir -p "${ZIPNAME}"
+          cp wrkmon-go-windows-amd64.exe "${ZIPNAME}/wrkmon-go.exe"
+          cp scripts/install.ps1 "${ZIPNAME}/" 2>/dev/null || true
+          cp scripts/uninstall.ps1 "${ZIPNAME}/" 2>/dev/null || true
+          cp README.md "${ZIPNAME}/" 2>/dev/null || true
+
+          zip -r "${ZIPNAME}.zip" "${ZIPNAME}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wrkmon-go-zip-windows
+          path: "*.zip"
+
+  release:
+    needs: [build, package-deb, package-tar, package-zip]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -63,4 +174,38 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: wrkmon-go-*
+          body: |
+            ## Installation
+
+            ### Linux (one-liner)
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/Umar-Khan-Yousafzai/wrkmon-go/main/scripts/install.sh | bash
+            ```
+
+            ### Linux (.deb — Ubuntu/Debian)
+            ```bash
+            # Download the .deb for your architecture, then:
+            sudo dpkg -i wrkmon-go_*.deb
+            sudo apt-get install -f   # installs mpv + yt-dlp dependencies
+            ```
+
+            ### Windows (PowerShell)
+            ```powershell
+            irm https://raw.githubusercontent.com/Umar-Khan-Yousafzai/wrkmon-go/main/scripts/install.ps1 | iex
+            ```
+
+            ### macOS
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/Umar-Khan-Yousafzai/wrkmon-go/main/scripts/install.sh | bash
+            ```
+
+            ### Requirements
+            - **mpv** — audio playback engine
+            - **yt-dlp** — YouTube stream resolver
+
+            The installer scripts will check for these and tell you how to install them.
+          files: |
+            wrkmon-go-*
+            *.deb
+            *.tar.gz
+            *.zip
