@@ -87,3 +87,10 @@ type DownloadsLoadedMsg struct {
 	Downloads []core.Download
 	Err       error
 }
+
+// LyricsLoadedMsg carries fetched lyrics.
+type LyricsLoadedMsg struct {
+	Lyrics string
+	Title  string
+	Err    error
+}

@@ -37,6 +37,9 @@ type Store interface {
 	LoadQueue(ctx context.Context) ([]core.Track, int, error)
 	CacheSearchResults(ctx context.Context, query string, results []core.SearchResult, ttl time.Duration) error
 	GetCachedSearch(ctx context.Context, query string) ([]core.SearchResult, bool, error)
+	// Lyrics cache
+	CacheLyrics(ctx context.Context, videoID, lyrics string) error
+	GetCachedLyrics(ctx context.Context, videoID string) (string, bool, error)
 	// Downloads
 	SaveDownload(ctx context.Context, dl core.Download) error
 	ListDownloads(ctx context.Context, limit int) ([]core.Download, error)

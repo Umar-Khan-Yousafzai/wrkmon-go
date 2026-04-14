@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/lyrics"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/ports"
 )
@@ -16,6 +17,7 @@ type Facade struct {
 	searcher ports.Searcher
 	player   ports.Player
 	store    ports.Store
+	lyrics   *lyrics.Fetcher
 	queue    *core.Queue
 	state    core.PlayerState
 }
@@ -26,6 +28,7 @@ func NewFacade(searcher ports.Searcher, player ports.Player, store ports.Store) 
 		searcher: searcher,
 		player:   player,
 		store:    store,
+		lyrics:   lyrics.NewFetcher(),
 		queue:    core.NewQueue(),
 		state: core.PlayerState{
 			Volume: 50,
@@ -283,6 +286,22 @@ func (f *Facade) PlayPlaylist(ctx context.Context, id int) error {
 		f.queue.Add(t)
 	}
 	return f.PlayFromQueue(ctx)
+}
+
+// FetchLyrics fetches lyrics for a track, using cache when available.
+func (f *Facade) FetchLyrics(ctx context.Context, videoID, title, channel string) (string, error) {
+	// Check cache
+	if cached, ok, _ := f.store.GetCachedLyrics(ctx, videoID); ok {
+		return cached, nil
+	}
+	// Fetch from API
+	text, err := f.lyrics.Fetch(ctx, title, channel)
+	if err != nil {
+		return "", err
+	}
+	// Cache result
+	_ = f.store.CacheLyrics(ctx, videoID, text)
+	return text, nil
 }
 
 // DownloadTrack downloads audio for a track to the given directory.

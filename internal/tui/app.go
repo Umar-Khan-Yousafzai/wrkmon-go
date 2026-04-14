@@ -88,6 +88,10 @@ type App struct {
 	downloads      []core.Download
 	downloadCursor int
 
+	// Lyrics state
+	lyricsText  string
+	lyricsTitle string
+
 	// Playback position tracking
 	currentPos float64
 	currentDur float64
@@ -350,6 +354,18 @@ func (a *App) buildCommands() *commands.Dispatcher {
 	})
 
 	d.Register(commands.Command{
+		Name:        "/lyrics",
+		Description: "Show lyrics for current track",
+		Handler: func(args string) (string, error) {
+			state := a.facade.State()
+			if state.Current == nil {
+				return "", fmt.Errorf("nothing playing")
+			}
+			return "FETCH_LYRICS", nil
+		},
+	})
+
+	d.Register(commands.Command{
 		Name:        "/download",
 		Description: "Download current track as MP3, or /download list",
 		Handler: func(args string) (string, error) {
@@ -475,9 +491,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, tea.Batch(cmds...)
 			}
 		case "esc":
-			// Clear help text, go back from detail, or switch to search
+			// Clear overlays, go back from detail, or switch to search
 			if a.helpText != "" {
 				a.helpText = ""
+			} else if a.lyricsText != "" {
+				a.lyricsText = ""
+				a.lyricsTitle = ""
 			} else if a.currentView == viewPlaylistDetail {
 				a.currentView = viewPlaylists
 			} else {
@@ -639,6 +658,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.currentView = viewPlaylistDetail
 		}
 
+	case LyricsLoadedMsg:
+		a.loading = false
+		if msg.Err != nil {
+			cmds = append(cmds, a.toast.Show("Lyrics: "+msg.Err.Error(), true))
+		} else {
+			a.lyricsText = msg.Lyrics
+			a.lyricsTitle = msg.Title
+		}
+
 	case DownloadCompleteMsg:
 		a.loading = false
 		if msg.Err != nil {
@@ -726,6 +754,12 @@ func (a *App) renderContent(height int) string {
 	// Show help overlay if active
 	if a.helpText != "" {
 		content = "\n" + a.styles.Title.Render("  Help") + "\n\n" + a.styles.Muted.Render(a.helpText) + "\n\n" + a.styles.Muted.Render("  Press Esc to close")
+		return lipgloss.NewStyle().Width(a.width).Height(height).Render(content)
+	}
+
+	// Show lyrics overlay if active
+	if a.lyricsText != "" {
+		content = "\n" + a.styles.Title.Render("  Lyrics — "+a.lyricsTitle) + "\n\n" + a.styles.Muted.Render(a.lyricsText) + "\n\n" + a.styles.Muted.Render("  Press Esc to close")
 		return lipgloss.NewStyle().Width(a.width).Height(height).Render(content)
 	}
 
@@ -1062,6 +1096,8 @@ func (a *App) handleSubmit(input string) tea.Cmd {
 			return a.doPrevTrack()
 		case result == "UPDATE_YTDLP":
 			return a.doUpdateYtDlp()
+		case result == "FETCH_LYRICS":
+			return a.doFetchLyrics()
 		case result == "LOAD_DOWNLOADS":
 			return a.doLoadDownloads()
 		case strings.HasPrefix(result, "DOWNLOAD:"):
@@ -1288,6 +1324,20 @@ func (a *App) doUpdateYtDlp() tea.Cmd {
 	return func() tea.Msg {
 		output, err := a.facade.UpdateYtDlp(context.Background())
 		return YtDlpUpdateMsg{Output: output, Err: err}
+	}
+}
+
+func (a *App) doFetchLyrics() tea.Cmd {
+	state := a.facade.State()
+	if state.Current == nil {
+		return a.toast.Show("Nothing playing", true)
+	}
+	track := *state.Current
+	a.loading = true
+	a.loadingText = "Fetching lyrics..."
+	return func() tea.Msg {
+		text, err := a.facade.FetchLyrics(context.Background(), track.VideoID, track.Title, track.Channel)
+		return LyricsLoadedMsg{Lyrics: text, Title: track.Title, Err: err}
 	}
 }
 

@@ -102,6 +102,12 @@ func (s *SQLiteStore) migrate() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_playlist_items_pid ON playlist_items(playlist_id, position);
 
+	CREATE TABLE IF NOT EXISTS lyrics_cache (
+		video_id   TEXT PRIMARY KEY,
+		lyrics     TEXT NOT NULL,
+		fetched_at TEXT NOT NULL
+	);
+
 	CREATE TABLE IF NOT EXISTS downloads (
 		id            INTEGER PRIMARY KEY AUTOINCREMENT,
 		video_id      TEXT NOT NULL,
@@ -325,6 +331,27 @@ func (s *SQLiteStore) GetCachedSearch(ctx context.Context, query string) ([]core
 		return nil, false, nil // corrupted cache = miss
 	}
 	return results, true, nil
+}
+
+// CacheLyrics stores lyrics for a video.
+func (s *SQLiteStore) CacheLyrics(ctx context.Context, videoID, lyrics string) error {
+	_, err := s.db.ExecContext(ctx,
+		`INSERT OR REPLACE INTO lyrics_cache (video_id, lyrics, fetched_at) VALUES (?, ?, ?)`,
+		videoID, lyrics, time.Now().Format(time.RFC3339),
+	)
+	return err
+}
+
+// GetCachedLyrics returns cached lyrics for a video ID.
+func (s *SQLiteStore) GetCachedLyrics(ctx context.Context, videoID string) (string, bool, error) {
+	var lyrics string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT lyrics FROM lyrics_cache WHERE video_id = ?`, videoID,
+	).Scan(&lyrics)
+	if err != nil {
+		return "", false, nil
+	}
+	return lyrics, true, nil
 }
 
 // SaveDownload records a completed download.
