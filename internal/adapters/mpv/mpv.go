@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +19,7 @@ var _ ports.Player = (*MPV)(nil)
 
 // MPV controls an mpv subprocess via JSON IPC.
 type MPV struct {
+	binPath  string // resolved mpv executable path
 	cmd      *exec.Cmd
 	conn     net.Conn
 	reader   *bufio.Reader
@@ -44,20 +44,33 @@ type ipcResponse struct {
 	Error     string      `json:"error"`
 }
 
-// New creates an MPV adapter. No subprocess is started until Play is called.
-func New() *MPV {
-	return &MPV{}
+// New creates an MPV adapter that resolves the binary on each Play call via
+// locator precedence (config → bundled → PATH). Returns nil and an error if
+// the config override is set but unreachable.
+func New(configPath string) (*MPV, error) {
+	result, err := Locate(configPath)
+	if err != nil {
+		return nil, err
+	}
+	return &MPV{binPath: result.Path}, nil
 }
+
+// BinPath returns the resolved mpv binary path.
+func (m *MPV) BinPath() string { return m.binPath }
 
 // Play stops any existing mpv instance, then launches a new one for the given
 // audio URL and connects to its IPC socket.
 func (m *MPV) Play(url string) error {
 	m.stop()
 
-	sockPath := filepath.Join(os.TempDir(), fmt.Sprintf("wrkmon-mpv-%d.sock", os.Getpid()))
-	os.Remove(sockPath)
+	sockPath := socketPath(os.Getpid())
+	removeSocketFile(sockPath)
 
-	cmd := exec.Command("mpv",
+	bin := m.binPath
+	if bin == "" {
+		bin = "mpv"
+	}
+	cmd := exec.Command(bin,
 		"--no-video",
 		"--no-terminal",
 		fmt.Sprintf("--input-ipc-server=%s", sockPath),
@@ -274,7 +287,7 @@ func (m *MPV) stop() {
 	}
 
 	if m.sockPath != "" {
-		os.Remove(m.sockPath)
+		removeSocketFile(m.sockPath)
 		m.sockPath = ""
 	}
 

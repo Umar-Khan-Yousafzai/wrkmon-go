@@ -18,10 +18,14 @@ sudo dpkg -i wrkmon-go_*.deb
 sudo apt-get install -f   # auto-installs mpv + yt-dlp
 ```
 
-### Windows (PowerShell)
+### Windows (PowerShell — fully automatic)
 ```powershell
 irm https://raw.githubusercontent.com/Umar-Khan-Yousafzai/wrkmon-go/main/scripts/install.ps1 | iex
 ```
+The installer downloads wrkmon-go, yt-dlp.exe, and mpv (via winget or portable .7z) on your behalf — no manual `winget install` steps. Also wires up user PATH and registers the app in Add/Remove Programs.
+
+### Windows (GUI wizard)
+Download `wrkmon-go_<version>_windows_amd64.zip` from the [latest release](https://github.com/Umar-Khan-Yousafzai/wrkmon-go/releases/latest), extract, right-click `installer-gui.ps1` → **Run with PowerShell**. Shows a native WinForms wizard with progress bar and live install log.
 
 ### macOS
 ```bash
@@ -35,7 +39,7 @@ wrkmon-go needs these on your system:
 - **[mpv](https://mpv.io)** — audio playback engine
 - **[yt-dlp](https://github.com/yt-dlp/yt-dlp)** — YouTube stream resolver
 
-The installer scripts check for these and tell you how to install them if missing.
+The Windows installer provisions both automatically. On Linux/macOS the installer scripts check for these and guide you to the right package manager.
 
 ## Usage
 

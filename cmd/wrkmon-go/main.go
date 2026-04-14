@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/mpv"
@@ -19,43 +18,32 @@ var version = "dev"
 func main() {
 	cfg := config.Load()
 
-	// Initialize adapters.
 	searcher, err := ytdlp.NewClient(cfg.YtDlpPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "yt-dlp not found: %v\nInstall yt-dlp: pip install yt-dlp\n", err)
-		os.Exit(1)
+		reportFatal("wrkmon-go: yt-dlp not found",
+			fmt.Sprintf("%v\n\nInstall wrkmon-go via the official installer to provision yt-dlp automatically, or place yt-dlp next to the wrkmon-go binary.", err))
 	}
 
-	// Check mpv is available.
-	mpvBin := "mpv"
-	if cfg.MpvPath != "" {
-		mpvBin = cfg.MpvPath
+	player, err := mpv.New(cfg.MpvPath)
+	if err != nil {
+		reportFatal("wrkmon-go: mpv not found",
+			fmt.Sprintf("%v\n\nInstall wrkmon-go via the official installer to provision mpv automatically, or install mpv from your system package manager.", err))
 	}
-	if _, err := exec.LookPath(mpvBin); err != nil {
-		fmt.Fprintf(os.Stderr, "mpv not found: %v\nInstall mpv:\n  Ubuntu/Debian: sudo apt install mpv\n  macOS: brew install mpv\n  Windows: winget install mpv\n", err)
-		os.Exit(1)
-	}
-
-	player := mpv.New()
 
 	dbPath := config.DBPath()
 	storage, err := store.NewSQLiteStore(dbPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "database error: %v\n", err)
-		os.Exit(1)
+		reportFatal("wrkmon-go: database error", err.Error())
 	}
 	defer storage.Close()
 
-	// Create facade and app.
 	facade := tui.NewFacade(searcher, player, storage)
 	defer facade.Close()
 
 	app := tui.NewApp(facade, cfg)
 
-	// Ensure data directory exists.
 	os.MkdirAll(config.DataDir(), 0o755)
 
-	// Run the TUI.
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

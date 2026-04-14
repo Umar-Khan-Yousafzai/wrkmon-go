@@ -109,7 +109,7 @@ jobs:
           DIR="wrkmon-go_${VERSION}_windows_amd64"
           mkdir -p "${DIR}"
           cp wrkmon-go-windows-amd64.exe "${DIR}/wrkmon-go.exe"
-          cp scripts/install.ps1 scripts/uninstall.ps1 README.md "${DIR}/" 2>/dev/null || true
+          cp scripts/install.ps1 scripts/installer-gui.ps1 scripts/uninstall.ps1 README.md "${DIR}/" 2>/dev/null || true
           zip -r "${DIR}.zip" "${DIR}"
 
       - name: List release files
@@ -133,19 +133,22 @@ jobs:
             sudo apt-get install -f
             ```
 
-            ### Windows (PowerShell)
+            ### Windows (PowerShell — fully automatic)
             ```powershell
             irm https://raw.githubusercontent.com/Umar-Khan-Yousafzai/wrkmon-go/main/scripts/install.ps1 | iex
             ```
+            The installer downloads wrkmon-go, yt-dlp.exe, and mpv (via winget or portable .7z fallback) — zero manual steps.
+
+            ### Windows (GUI wizard)
+            Download the `wrkmon-go_*_windows_amd64.zip` asset, extract, right-click `installer-gui.ps1` → **Run with PowerShell**. Native WinForms wizard with progress bar and live log.
 
             ### macOS
             ```bash
             curl -fsSL https://raw.githubusercontent.com/Umar-Khan-Yousafzai/wrkmon-go/main/scripts/install.sh | bash
             ```
 
-            ### Requirements
-            - **mpv** — audio playback engine
-            - **yt-dlp** — YouTube stream resolver
+            ### Dependencies
+            The Windows installer provisions **mpv** + **yt-dlp** automatically. Linux/macOS installers guide you to your package manager.
           files: |
             wrkmon-go-*
             *.deb

@@ -11,12 +11,28 @@ import (
 var _ ports.Player = (*MPV)(nil)
 
 func TestNew(t *testing.T) {
-	m := New()
+	if _, err := exec.LookPath("mpv"); err != nil {
+		t.Skip("mpv not on PATH")
+	}
+	m, err := New("")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	if m == nil {
 		t.Fatal("New returned nil")
 	}
 	if m.IsRunning() {
 		t.Error("should not be running before Play")
+	}
+	if m.BinPath() == "" {
+		t.Error("BinPath should be populated")
+	}
+}
+
+func TestNew_ConfigNotFound(t *testing.T) {
+	_, err := New("/nonexistent/path/to/mpv-xyz")
+	if err == nil {
+		t.Error("expected error for bogus config path")
 	}
 }
 
@@ -24,65 +40,57 @@ func TestPlay_NoMpv(t *testing.T) {
 	if _, err := exec.LookPath("mpv"); err == nil {
 		t.Skip("mpv is available, skipping no-mpv test")
 	}
-	m := New()
-	err := m.Play("https://example.com/audio.mp3")
+	_, err := New("")
 	if err == nil {
 		t.Error("expected error when mpv not found")
 	}
 }
 
 func TestStopBeforePlay(t *testing.T) {
-	m := New()
-	// Stop on a fresh instance should be a no-op, not a panic.
+	m := &MPV{}
 	if err := m.Stop(); err != nil {
 		t.Errorf("Stop on fresh instance: %v", err)
 	}
 }
 
 func TestCloseBeforePlay(t *testing.T) {
-	m := New()
-	// Close on a fresh instance should be a no-op, not a panic.
+	m := &MPV{}
 	if err := m.Close(); err != nil {
 		t.Errorf("Close on fresh instance: %v", err)
 	}
 }
 
 func TestPauseNotConnected(t *testing.T) {
-	m := New()
-	err := m.Pause()
-	if err == nil {
+	m := &MPV{}
+	if err := m.Pause(); err == nil {
 		t.Error("expected error when Pause called without connection")
 	}
 }
 
 func TestResumeNotConnected(t *testing.T) {
-	m := New()
-	err := m.Resume()
-	if err == nil {
+	m := &MPV{}
+	if err := m.Resume(); err == nil {
 		t.Error("expected error when Resume called without connection")
 	}
 }
 
 func TestSeekNotConnected(t *testing.T) {
-	m := New()
-	err := m.Seek(10)
-	if err == nil {
+	m := &MPV{}
+	if err := m.Seek(10); err == nil {
 		t.Error("expected error when Seek called without connection")
 	}
 }
 
 func TestSetVolumeNotConnected(t *testing.T) {
-	m := New()
-	err := m.SetVolume(50)
-	if err == nil {
+	m := &MPV{}
+	if err := m.SetVolume(50); err == nil {
 		t.Error("expected error when SetVolume called without connection")
 	}
 }
 
 func TestGetPositionNotConnected(t *testing.T) {
-	m := New()
-	_, err := m.GetPosition()
-	if err == nil {
+	m := &MPV{}
+	if _, err := m.GetPosition(); err == nil {
 		t.Error("expected error when GetPosition called without connection")
 	}
 }
