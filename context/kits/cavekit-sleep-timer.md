@@ -1,6 +1,7 @@
 ---
 created: "2026-04-14"
 last_edited: "2026-04-14"
+revision: 2
 ---
 
 # Cavekit: Sleep Timer
@@ -39,6 +40,7 @@ User-initiated countdown that halts playback after a chosen duration. Covers sta
 - [ ] On elapse, the user is informed via a visible indication that the sleep timer fired.
 - [ ] After elapse, no further queued tracks begin playing automatically.
 - [ ] After elapse, the timer is considered inactive and a status query reports no active timer.
+- [ ] After elapse, a subsequent play action from any source (slash command, keyboard shortcut, or media key) resumes the current track from its halted position and does not re-arm the timer.
 
 ### R5: Session-Scoped Lifetime
 **Description:** Timer state exists only for the current session.

@@ -1,6 +1,7 @@
 ---
 created: "2026-04-14"
 last_edited: "2026-04-14"
+revision: 2
 ---
 
 # Cavekit: Stealth Mode
@@ -41,7 +42,7 @@ A toggle that overrides the terminal window title with a neutral, user-configura
 ### R5: Metadata Suppression (Optional)
 **Description:** When stealth is active, now-playing metadata surfaced to the OS is suppressed.
 **Acceptance Criteria:**
-- [ ] While stealth is enabled, any track title or artist that would otherwise be exposed via OS media integration is not exposed or is replaced with a neutral placeholder.
+- [ ] While stealth is enabled, no track title, artist, or uploader is exposed via OS media integration; the metadata slots are either cleared or left unset.
 - [ ] When stealth is disabled, normal metadata exposure resumes for subsequent track changes.
 - [ ] Suppression failure (for example, because the OS integration is unavailable) does not prevent the title override in R2.
 
