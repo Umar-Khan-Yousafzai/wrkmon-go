@@ -37,12 +37,9 @@ func NewFacade(searcher ports.Searcher, player ports.Player, store ports.Store) 
 }
 
 // Search performs a YouTube search, using cache when available.
+// Check cache first — return the full accumulated list, never truncated.
 func (f *Facade) Search(ctx context.Context, query string, limit int) ([]core.SearchResult, error) {
-	// Check cache first
 	if cached, ok, _ := f.store.GetCachedSearch(ctx, query); ok && len(cached) > 0 {
-		if len(cached) > limit {
-			cached = cached[:limit]
-		}
 		return cached, nil
 	}
 
@@ -55,6 +52,18 @@ func (f *Facade) Search(ctx context.Context, query string, limit int) ([]core.Se
 	_ = f.store.CacheSearchResults(ctx, query, results, time.Hour)
 
 	return results, nil
+}
+
+// SearchMore fetches the first fetchTotal results for query directly from
+// the searcher, bypassing the cache. Used by infinite-scroll accumulation:
+// yt-dlp has no cursor, so "more" means refetching a larger prefix.
+func (f *Facade) SearchMore(ctx context.Context, query string, fetchTotal int) ([]core.SearchResult, error) {
+	return f.searcher.Search(ctx, query, fetchTotal)
+}
+
+// CacheSearch overwrites the cached result list for query (best-effort).
+func (f *Facade) CacheSearch(ctx context.Context, query string, results []core.SearchResult) {
+	_ = f.store.CacheSearchResults(ctx, query, results, time.Hour)
 }
 
 // PlayTrack resolves the stream URL and starts playback.
