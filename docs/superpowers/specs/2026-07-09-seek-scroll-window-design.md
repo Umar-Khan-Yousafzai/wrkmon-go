@@ -135,6 +135,9 @@ Each refetch re-downloads metadata from index 0 (yt-dlp limitation). Flat-playli
 - `scripts/install.sh` installs both to `~/.local/share/applications/` and `~/.local/share/icons/hicolor/256x256/apps/`, then runs `update-desktop-database` if present. Uninstall removes them.
 - `.deb` packaging includes desktop file + icon at the system paths.
 - Windows installer adds a Start-Menu shortcut invoking `wrkmon-go.exe window`.
+- macOS: install.sh creates a minimal `~/Applications/wrkmon.app` bundle (Info.plist + launcher script exec'ing `wrkmon-go window`) so the app appears in Launchpad/Spotlight.
+
+Cross-platform is a hard requirement: all three features work on Linux, macOS, and Windows; OS-specific code sits behind `runtime.GOOS` or per-OS files.
 
 ---
 
