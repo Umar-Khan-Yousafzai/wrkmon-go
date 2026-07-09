@@ -12,7 +12,7 @@ import (
 // LocateResult describes which yt-dlp binary was found and how.
 type LocateResult struct {
 	Path    string
-	Bundled bool   // true if found next to the wrkmon binary
+	Bundled bool   // true if the binary is wrkmon-owned (managed or bundled)
 	Source  string // human-readable description
 }
 

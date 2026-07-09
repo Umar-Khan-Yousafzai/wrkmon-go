@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
@@ -19,6 +20,7 @@ var _ ports.Searcher = (*Client)(nil)
 
 // Client wraps yt-dlp subprocess calls.
 type Client struct {
+	mu         sync.RWMutex
 	binPath    string // path to yt-dlp binary
 	bundled    bool   // whether the binary is wrkmon-owned (managed or bundled) and can self-update
 	managedDir string // where the auto-updater installs the managed copy
@@ -34,19 +36,42 @@ func NewClient(configPath, managedDir string) (*Client, error) {
 	return &Client{binPath: result.Path, bundled: result.Bundled, managedDir: managedDir}, nil
 }
 
-// BinPath returns the resolved yt-dlp binary path.
-func (c *Client) BinPath() string { return c.binPath }
+// bin returns the current binary path (thread-safe).
+func (c *Client) bin() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.binPath
+}
 
-// IsBundled reports whether the active binary is the bundled one.
-func (c *Client) IsBundled() bool { return c.bundled }
+// selfUpdatable reports whether the current binary is wrkmon-owned (thread-safe).
+func (c *Client) selfUpdatable() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.bundled
+}
+
+// Relocate atomically switches the client to a different yt-dlp binary.
+// In-flight commands finish on the old path; subsequent calls use the new one.
+func (c *Client) Relocate(path string, selfUpdatable bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.binPath = path
+	c.bundled = selfUpdatable
+}
+
+// BinPath returns the resolved yt-dlp binary path.
+func (c *Client) BinPath() string { return c.bin() }
+
+// IsBundled reports whether the active binary is wrkmon-owned (managed or bundled).
+func (c *Client) IsBundled() bool { return c.selfUpdatable() }
 
 // Update runs yt-dlp -U to self-update the binary.
 // Returns the output from yt-dlp.
 func (c *Client) Update(ctx context.Context) (string, error) {
-	if !c.bundled {
+	if !c.selfUpdatable() {
 		return "System yt-dlp can't self-update — use your package manager", nil
 	}
-	cmd := exec.CommandContext(ctx, c.binPath, "-U")
+	cmd := exec.CommandContext(ctx, c.bin(), "-U")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(output), fmt.Errorf("yt-dlp update failed: %w", err)
@@ -67,7 +92,7 @@ type searchResult struct {
 func (c *Client) Search(ctx context.Context, query string, limit int) ([]core.SearchResult, error) {
 	searchQuery := "ytsearch" + strconv.Itoa(limit) + ":" + query
 
-	cmd := exec.CommandContext(ctx, c.binPath,
+	cmd := exec.CommandContext(ctx, c.bin(),
 		searchQuery,
 		"--dump-json",
 		"--flat-playlist",
@@ -132,7 +157,7 @@ func (c *Client) Search(ctx context.Context, query string, limit int) ([]core.Se
 func (c *Client) GetStreamURL(ctx context.Context, videoID string) (string, error) {
 	url := "https://www.youtube.com/watch?v=" + videoID
 
-	cmd := exec.CommandContext(ctx, c.binPath,
+	cmd := exec.CommandContext(ctx, c.bin(),
 		"-f", "bestaudio",
 		"--get-url",
 		"--no-warnings",
@@ -163,7 +188,7 @@ func (c *Client) Download(ctx context.Context, videoID string, outputDir string)
 	// Use output template to get predictable filename
 	outputTmpl := outputDir + "/%(title)s.%(ext)s"
 
-	cmd := exec.CommandContext(ctx, c.binPath,
+	cmd := exec.CommandContext(ctx, c.bin(),
 		"-f", "bestaudio",
 		"--extract-audio",
 		"--audio-format", "mp3",

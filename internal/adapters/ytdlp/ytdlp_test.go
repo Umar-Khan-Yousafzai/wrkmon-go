@@ -93,3 +93,14 @@ func TestGetStreamURL_Integration(t *testing.T) {
 
 	t.Logf("stream URL length: %d, prefix: %.80s...", len(streamURL), streamURL)
 }
+
+func TestRelocateSwapsBinary(t *testing.T) {
+	c := &Client{binPath: "/old/yt-dlp", bundled: false}
+	c.Relocate("/new/yt-dlp", true)
+	if c.BinPath() != "/new/yt-dlp" {
+		t.Errorf("BinPath = %s, want /new/yt-dlp", c.BinPath())
+	}
+	if !c.IsBundled() {
+		t.Error("IsBundled must be true after Relocate(…, true)")
+	}
+}
