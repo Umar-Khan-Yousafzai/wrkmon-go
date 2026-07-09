@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -229,6 +230,76 @@ func TestMouseNowPlayingBarClickAndOverlayGating(t *testing.T) {
 	})
 	if player.lastPct != -1 {
 		t.Errorf("expected no seek while help overlay open, got %.2f", player.lastPct)
+	}
+}
+
+// TestNowPlayingBarGeometryStableWithLongTitle guards against a regression
+// where a title (or channel) too long to fit the terminal width wrapped onto
+// extra visual rows when rendered through renderContent, but npBarRow —
+// computed from a raw "\n" count on the unwrapped builder string — couldn't
+// see those wrapped rows. The bar's real on-screen row then drifted below
+// npBarRow, so a real click at the bar's true visual position (which is all
+// a real terminal ever reports) landed on a Y the click handler didn't
+// recognize as the bar, and the click silently did nothing.
+//
+// The test renders through App.View() (the same renderContent path that
+// wraps at a.width) with a 200-char title/channel at width 80, independently
+// locates the bar's true visual row by scanning the rendered text for the
+// progress-bar's line-drawing characters (NOT by trusting app.npBarRow),
+// and clicks there. Before the fix this row wouldn't match app.npBarRow and
+// the seek would never fire; after the fix (title/channel truncated to one
+// row each) the two agree and the seek lands ~50%.
+func TestNowPlayingBarGeometryStableWithLongTitle(t *testing.T) {
+	player := &mousePlayer{}
+	f := NewFacade(mouseSearcher{}, player, mouseStore{})
+
+	if err := f.PlayTrack(context.Background(), core.Track{
+		VideoID:  "v",
+		Title:    strings.Repeat("x", 200),
+		Channel:  strings.Repeat("y", 200),
+		Duration: 100 * time.Second,
+	}); err != nil {
+		t.Fatalf("PlayTrack: %v", err)
+	}
+
+	app := NewApp(f, config.DefaultConfig())
+	app.Update(tea.WindowSizeMsg{Width: 80, Height: 30})
+	app.currentView = viewNowPlaying
+	app.Update(PositionUpdateMsg{Position: 10, Duration: 100})
+
+	// Render through App.View(), not renderNowPlayingView() directly, so
+	// the terminal-width wrapping that triggers the regression actually runs.
+	rendered := app.View()
+
+	if app.npBarWidth <= 0 {
+		t.Fatalf("expected npBarWidth > 0 after render, got %d", app.npBarWidth)
+	}
+
+	// Locate the bar's true visual row independently of app.npBarRow: it's
+	// the only line containing the progress-bar's heavy/light horizontal
+	// line-drawing runes (see progressBar()).
+	visualRow := -1
+	for i, line := range strings.Split(rendered, "\n") {
+		if strings.ContainsRune(line, '━') || strings.ContainsRune(line, '─') {
+			visualRow = i
+			break
+		}
+	}
+	if visualRow == -1 {
+		t.Fatal("could not locate the progress bar's rendered row")
+	}
+
+	clickX := app.npBarStart + app.npBarWidth/2
+	app.Update(tea.MouseMsg{
+		X:      clickX,
+		Y:      visualRow,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+	})
+
+	if player.lastPct < 48 || player.lastPct > 52 {
+		t.Errorf("SeekPercent called with %.2f, want ~50 (click at the bar's true visual row %d didn't register; app.npBarRow=%d)",
+			player.lastPct, visualRow, app.npBarRow)
 	}
 }
 

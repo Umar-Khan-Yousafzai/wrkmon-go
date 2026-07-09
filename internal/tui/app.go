@@ -32,6 +32,13 @@ const (
 // searchBatch is how many additional results each infinite-scroll fetch requests.
 const searchBatch = 25
 
+// npBarIndent is the left indent (in columns) of the now-playing progress
+// bar line. It must match the "  " prefix written before the bar in
+// renderNowPlayingView AND the a.npBarStart geometry captured there, since
+// mouse-click hit testing (handleMouseMsg) uses npBarStart to map clicks
+// back to the bar.
+const npBarIndent = 2
+
 func (v activeView) String() string {
 	switch v {
 	case viewSearch:
@@ -1007,6 +1014,17 @@ func (a *App) renderHistoryView() string {
 	return b.String()
 }
 
+// truncateLine shortens s so a line with the given prefix width never wraps.
+func truncateLine(s string, max int) string {
+	if max < 1 {
+		return ""
+	}
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-1] + "…"
+}
+
 func (a *App) renderNowPlayingView() string {
 	state := a.facade.State()
 	if state.Current == nil {
@@ -1021,13 +1039,16 @@ func (a *App) renderNowPlayingView() string {
 	b.WriteString(title)
 	b.WriteString("\n\n")
 
-	// Track info
-	trackTitle := a.styles.Selected.Render("  " + state.Current.Title)
+	// Track info. Truncate so a long title/channel never wraps onto an
+	// extra visual row — renderContent wraps at a.width, but npBarRow
+	// below counts raw newlines and can't see wrapped rows.
+	titleMax := a.width - 4
+	trackTitle := a.styles.Selected.Render("  " + truncateLine(state.Current.Title, titleMax))
 	b.WriteString(trackTitle)
 	b.WriteString("\n")
 
 	if state.Current.Channel != "" {
-		channel := a.styles.Muted.Render("  " + state.Current.Channel)
+		channel := a.styles.Muted.Render("  " + truncateLine(state.Current.Channel, titleMax))
 		b.WriteString(channel)
 		b.WriteString("\n")
 	}
@@ -1048,9 +1069,9 @@ func (a *App) renderNowPlayingView() string {
 	}
 	bar := progressBar(a.currentPos, a.currentDur, barWidth)
 	a.npBarRow = strings.Count(b.String(), "\n") // row index of the bar line
-	a.npBarStart = 2
+	a.npBarStart = npBarIndent
 	a.npBarWidth = barWidth
-	b.WriteString("  " + a.styles.Accent.Render(bar))
+	b.WriteString(strings.Repeat(" ", npBarIndent) + a.styles.Accent.Render(bar))
 	b.WriteString("\n")
 
 	// Time display
