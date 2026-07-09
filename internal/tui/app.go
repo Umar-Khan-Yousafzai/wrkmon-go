@@ -442,7 +442,11 @@ func (a *App) Init() tea.Cmd {
 	if a.cfg.Volume > 0 {
 		_ = a.facade.SetVolume(a.cfg.Volume)
 	}
-	return textinput.Blink
+	cmds := []tea.Cmd{textinput.Blink}
+	if a.cfg.AutoUpdateYtDlp {
+		cmds = append(cmds, a.doAutoUpdateYtDlp())
+	}
+	return tea.Batch(cmds...)
 }
 
 // Update implements tea.Model.
@@ -721,6 +725,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			cmds = append(cmds, a.toast.Show("yt-dlp: "+msg.Output, false))
 		}
+
+	case YtDlpAutoUpdateMsg:
+		if msg.Err != nil {
+			cmds = append(cmds, a.toast.Show("yt-dlp auto-update: "+msg.Err.Error(), true))
+		} else if msg.Updated {
+			cmds = append(cmds, a.toast.Show(msg.Info, false))
+		}
+		// silent when already current
 
 	case PlaylistsLoadedMsg:
 		a.loading = false
@@ -1593,6 +1605,15 @@ func (a *App) doUpdateYtDlp() tea.Cmd {
 	return func() tea.Msg {
 		output, err := a.facade.UpdateYtDlp(context.Background())
 		return YtDlpUpdateMsg{Output: output, Err: err}
+	}
+}
+
+// doAutoUpdateYtDlp runs the mandatory startup freshness check in the
+// background; the TUI renders immediately while this works.
+func (a *App) doAutoUpdateYtDlp() tea.Cmd {
+	return func() tea.Msg {
+		info, updated, err := a.facade.EnsureLatestYtDlp(context.Background())
+		return YtDlpAutoUpdateMsg{Info: info, Updated: updated, Err: err}
 	}
 }
 

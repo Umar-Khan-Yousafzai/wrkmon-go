@@ -24,6 +24,7 @@ type Config struct {
 	Mouse            bool         `toml:"mouse"`
 	MaxSearchResults int          `toml:"max_search_results"`
 	Window           WindowConfig `toml:"window"`
+	AutoUpdateYtDlp  bool         `toml:"auto_update_ytdlp"`
 }
 
 // DefaultConfig returns sensible defaults.
@@ -35,6 +36,7 @@ func DefaultConfig() Config {
 		Mouse:            true,
 		MaxSearchResults: 100,
 		Window:           WindowConfig{Terminal: "auto"},
+		AutoUpdateYtDlp:  true,
 	}
 }
 

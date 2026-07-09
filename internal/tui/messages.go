@@ -71,6 +71,13 @@ type YtDlpUpdateMsg struct {
 	Err    error
 }
 
+// YtDlpAutoUpdateMsg carries the result of the startup yt-dlp check.
+type YtDlpAutoUpdateMsg struct {
+	Info    string
+	Updated bool
+	Err     error
+}
+
 // PlaylistsLoadedMsg carries loaded playlists.
 type PlaylistsLoadedMsg struct {
 	Playlists []core.Playlist

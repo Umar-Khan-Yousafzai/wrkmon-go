@@ -64,3 +64,11 @@ func TestWindowDefaults(t *testing.T) {
 		t.Errorf("Window.Terminal = %q, want auto", cfg.Window.Terminal)
 	}
 }
+
+func TestAutoUpdateYtDlpDefaultsTrue(t *testing.T) {
+	setTempHome(t)
+	cfg := Load()
+	if !cfg.AutoUpdateYtDlp {
+		t.Error("AutoUpdateYtDlp should default to true")
+	}
+}
