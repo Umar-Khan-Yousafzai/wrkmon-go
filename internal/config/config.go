@@ -7,16 +7,23 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// WindowConfig controls the `wrkmon-go window` launcher.
+type WindowConfig struct {
+	Terminal  string   `toml:"terminal"`   // "auto" or a supported terminal name
+	ExtraArgs []string `toml:"extra_args"` // appended to the terminal's argv
+}
+
 // Config holds application configuration.
 type Config struct {
-	Theme            string `toml:"theme"`
-	Volume           int    `toml:"volume"`
-	YtDlpPath        string `toml:"ytdlp_path"`
-	MpvPath          string `toml:"mpv_path"`
-	ResultsPerPage   int    `toml:"results_per_page"`
-	DownloadDir      string `toml:"download_dir"`
-	Mouse            bool   `toml:"mouse"`
-	MaxSearchResults int    `toml:"max_search_results"`
+	Theme            string       `toml:"theme"`
+	Volume           int          `toml:"volume"`
+	YtDlpPath        string       `toml:"ytdlp_path"`
+	MpvPath          string       `toml:"mpv_path"`
+	ResultsPerPage   int          `toml:"results_per_page"`
+	DownloadDir      string       `toml:"download_dir"`
+	Mouse            bool         `toml:"mouse"`
+	MaxSearchResults int          `toml:"max_search_results"`
+	Window           WindowConfig `toml:"window"`
 }
 
 // DefaultConfig returns sensible defaults.
@@ -27,6 +34,7 @@ func DefaultConfig() Config {
 		ResultsPerPage:   10,
 		Mouse:            true,
 		MaxSearchResults: 100,
+		Window:           WindowConfig{Terminal: "auto"},
 	}
 }
 

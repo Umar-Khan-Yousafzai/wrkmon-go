@@ -4,18 +4,28 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/mpv"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/store"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/ytdlp"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/config"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui"
 	_ "github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/layouts/single"
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/window"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "window" || os.Args[1] == "--window") {
+		cfg := config.Load()
+		if err := window.Launch(cfg.Window.Terminal, cfg.Window.ExtraArgs); err != nil {
+			fmt.Fprintln(os.Stderr, "wrkmon-go window:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg := config.Load()
 
 	searcher, err := ytdlp.NewClient(cfg.YtDlpPath)

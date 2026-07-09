@@ -56,3 +56,11 @@ func TestLoadHonorsExplicitValues(t *testing.T) {
 		t.Errorf("MaxSearchResults = %d, want 40", cfg.MaxSearchResults)
 	}
 }
+
+func TestWindowDefaults(t *testing.T) {
+	setTempHome(t)
+	cfg := Load()
+	if cfg.Window.Terminal != "auto" {
+		t.Errorf("Window.Terminal = %q, want auto", cfg.Window.Terminal)
+	}
+}
