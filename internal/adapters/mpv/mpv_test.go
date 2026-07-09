@@ -94,3 +94,17 @@ func TestGetPositionNotConnected(t *testing.T) {
 		t.Error("expected error when GetPosition called without connection")
 	}
 }
+
+func TestSeekToNotConnected(t *testing.T) {
+	m := &MPV{}
+	if err := m.SeekTo(30); err == nil {
+		t.Error("expected error when SeekTo called without connection")
+	}
+}
+
+func TestSeekPercentNotConnected(t *testing.T) {
+	m := &MPV{}
+	if err := m.SeekPercent(50); err == nil {
+		t.Error("expected error when SeekPercent called without connection")
+	}
+}

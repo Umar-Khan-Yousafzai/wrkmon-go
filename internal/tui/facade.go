@@ -159,6 +159,16 @@ func (f *Facade) Seek(seconds float64) error {
 	return f.player.Seek(seconds)
 }
 
+// SeekTo seeks to an absolute position in seconds.
+func (f *Facade) SeekTo(seconds float64) error {
+	return f.player.SeekTo(seconds)
+}
+
+// SeekPercent seeks to a percentage (0–100) of the track duration.
+func (f *Facade) SeekPercent(pct float64) error {
+	return f.player.SeekPercent(pct)
+}
+
 // SetVolume sets the volume (0-100).
 func (f *Facade) SetVolume(vol int) error {
 	if vol < 0 {

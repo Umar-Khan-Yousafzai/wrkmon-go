@@ -20,6 +20,8 @@ type Player interface {
 	Resume() error
 	Stop() error
 	Seek(seconds float64) error
+	SeekTo(seconds float64) error
+	SeekPercent(pct float64) error
 	SetVolume(vol int) error
 	GetPosition() (float64, error)
 	GetDuration() (float64, error)

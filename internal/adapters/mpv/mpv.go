@@ -167,6 +167,18 @@ func (m *MPV) Seek(seconds float64) error {
 	return err
 }
 
+// SeekTo seeks to an absolute position in seconds.
+func (m *MPV) SeekTo(seconds float64) error {
+	_, err := m.command("seek", seconds, "absolute")
+	return err
+}
+
+// SeekPercent seeks to an absolute percentage (0–100) of the duration.
+func (m *MPV) SeekPercent(pct float64) error {
+	_, err := m.command("seek", pct, "absolute-percent")
+	return err
+}
+
 // SetVolume sets the playback volume (0–100).
 func (m *MPV) SetVolume(vol int) error {
 	_, err := m.command("set_property", "volume", float64(vol))
