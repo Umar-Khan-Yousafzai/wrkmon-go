@@ -2,7 +2,9 @@ package ytdlp
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -92,6 +94,41 @@ func TestGetStreamURL_Integration(t *testing.T) {
 	}
 
 	t.Logf("stream URL length: %d, prefix: %.80s...", len(streamURL), streamURL)
+}
+
+func TestNewClient_ConfigPathIsPinned(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "custom-yt-dlp")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\necho 2026.07.01\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	client, err := NewClient(fake, t.TempDir())
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if !client.configPinned {
+		t.Error("configPinned must be true when resolved via config tier")
+	}
+	if client.bundled {
+		t.Error("config-pinned binary must not be marked self-updatable")
+	}
+}
+
+func TestNewClient_ManagedPathIsNotPinned(t *testing.T) {
+	dir := t.TempDir()
+	managed := filepath.Join(dir, managedName())
+	if err := os.WriteFile(managed, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	client, err := NewClient("", dir)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	if client.configPinned {
+		t.Error("configPinned must be false for a managed-tier resolution")
+	}
 }
 
 func TestRelocateSwapsBinary(t *testing.T) {

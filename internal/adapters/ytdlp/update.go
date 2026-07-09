@@ -47,6 +47,9 @@ func assetNameFor(goos, goarch string) string {
 func (c *Client) EnsureLatest(ctx context.Context) (string, bool, error) {
 	c.updateMu.Lock()
 	defer c.updateMu.Unlock()
+	if c.configPinned {
+		return "yt-dlp pinned via config (ytdlp_path) — auto-update skipped", false, nil
+	}
 	// Re-check after acquiring the lock: a concurrent caller may have
 	// migrated to the managed copy while we waited.
 	if c.selfUpdatable() {

@@ -20,10 +20,11 @@ var _ ports.Searcher = (*Client)(nil)
 
 // Client wraps yt-dlp subprocess calls.
 type Client struct {
-	mu         sync.RWMutex
-	binPath    string // path to yt-dlp binary
-	bundled    bool   // whether the binary is wrkmon-owned (managed or bundled) and can self-update
-	managedDir string // where the auto-updater installs the managed copy
+	mu           sync.RWMutex
+	binPath      string // path to yt-dlp binary
+	bundled      bool   // whether the binary is wrkmon-owned (managed or bundled) and can self-update
+	managedDir   string // where the auto-updater installs the managed copy
+	configPinned bool   // binary was explicitly set via config; never auto-replaced
 
 	updateMu sync.Mutex // serializes EnsureLatest end-to-end
 }
@@ -35,7 +36,12 @@ func NewClient(configPath, managedDir string) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{binPath: result.Path, bundled: result.Bundled, managedDir: managedDir}, nil
+	return &Client{
+		binPath:      result.Path,
+		bundled:      result.Bundled,
+		managedDir:   managedDir,
+		configPinned: strings.HasPrefix(result.Source, "config"),
+	}, nil
 }
 
 // bin returns the current binary path (thread-safe).
@@ -66,20 +72,6 @@ func (c *Client) BinPath() string { return c.bin() }
 
 // IsBundled reports whether the active binary is wrkmon-owned (managed or bundled).
 func (c *Client) IsBundled() bool { return c.selfUpdatable() }
-
-// Update runs yt-dlp -U to self-update the binary.
-// Returns the output from yt-dlp.
-func (c *Client) Update(ctx context.Context) (string, error) {
-	if !c.selfUpdatable() {
-		return "System yt-dlp can't self-update — use your package manager", nil
-	}
-	cmd := exec.CommandContext(ctx, c.bin(), "-U")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(output), fmt.Errorf("yt-dlp update failed: %w", err)
-	}
-	return strings.TrimSpace(string(output)), nil
-}
 
 // searchResult is the JSON shape yt-dlp emits per entry in flat-playlist mode.
 type searchResult struct {

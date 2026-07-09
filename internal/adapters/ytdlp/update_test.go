@@ -196,6 +196,32 @@ func TestEnsureLatestConcurrentCallsDoNotRace(t *testing.T) {
 	}
 }
 
+func TestEnsureLatestSkipsConfigPinned(t *testing.T) {
+	dir := t.TempDir()
+	c := &Client{binPath: "/custom/yt-dlp", bundled: false, configPinned: true, managedDir: dir}
+
+	msg, updated, err := c.EnsureLatest(context.Background())
+	if err != nil {
+		t.Fatalf("EnsureLatest: %v", err)
+	}
+	if updated {
+		t.Error("config-pinned binary must never report updated=true")
+	}
+	if !strings.Contains(msg, "pinned") {
+		t.Errorf("msg = %q, want it to mention \"pinned\"", msg)
+	}
+	if c.BinPath() != "/custom/yt-dlp" {
+		t.Errorf("BinPath = %s, want unchanged /custom/yt-dlp", c.BinPath())
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("managedDir must stay empty, found %v", entries)
+	}
+}
+
 func TestAssetName(t *testing.T) {
 	// Pins the per-OS asset table regardless of host OS.
 	cases := []struct{ goos, goarch, want string }{
