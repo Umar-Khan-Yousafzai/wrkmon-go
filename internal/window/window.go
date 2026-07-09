@@ -20,7 +20,14 @@ type termSpec struct {
 
 // specs returns the priority-ordered launch table for this OS.
 func specs() []termSpec {
-	switch runtime.GOOS {
+	return specsFor(runtime.GOOS)
+}
+
+// specsFor returns the priority-ordered launch table for the given GOOS.
+// Factored out of specs() so tests can exercise the Windows table on any
+// host without depending on runtime.GOOS.
+func specsFor(goos string) []termSpec {
+	switch goos {
 	case "windows":
 		return []termSpec{
 			{"wt", func(self string, extra []string) []string {
@@ -97,6 +104,16 @@ func names(table []termSpec) string {
 	return strings.Join(out, ", ")
 }
 
+// shouldFallback reports whether Launch may fall back to an OS-level
+// terminal (conhost/Terminal.app) when Resolve fails to find a configured
+// terminal. Fallbacks only apply to the "probe the table" cases (no
+// override, or the explicit "auto" override) — if the user explicitly named
+// a terminal in [window] terminal and it's missing or misspelled, Resolve's
+// error must be returned as-is instead of silently launching something else.
+func shouldFallback(override string) bool {
+	return override == "" || override == "auto"
+}
+
 // Launch opens the app window and returns once the terminal is spawned.
 func Launch(override string, extra []string) error {
 	self, err := os.Executable()
@@ -105,10 +122,16 @@ func Launch(override string, extra []string) error {
 	}
 	bin, args, err := Resolve(self, override, extra, exec.LookPath)
 	if err != nil {
+		if !shouldFallback(override) {
+			return err
+		}
 		// OS-level fallbacks that aren't PATH-probed terminals.
 		switch runtime.GOOS {
 		case "windows":
-			return exec.Command("cmd", "/c", "start", "wrkmon", self).Start()
+			// The empty quoted "" is the START command's window-title
+			// argument; without it, an unquoted first arg (e.g. "wrkmon")
+			// is parsed by START as the program to run instead of a title.
+			return exec.Command("cmd", "/c", "start", "", self).Start()
 		case "darwin":
 			return exec.Command("osascript", "-e",
 				fmt.Sprintf(`tell application "Terminal" to do script %q`, self)).Start()

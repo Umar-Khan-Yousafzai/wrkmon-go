@@ -92,6 +92,48 @@ func TestResolveNoneInstalled(t *testing.T) {
 	}
 }
 
+// TestSpecsForWindowsWtArgv locks down the Windows Terminal ("wt") argv
+// shape. It runs on any host (specsFor takes goos explicitly instead of
+// reading runtime.GOOS), so it also exercises the Windows table on linux CI.
+func TestSpecsForWindowsWtArgv(t *testing.T) {
+	table := specsFor("windows")
+	if len(table) != 1 || table[0].name != "wt" {
+		t.Fatalf("windows table = %+v, want a single wt entry", table)
+	}
+
+	args := table[0].args("/opt/wrkmon-go", nil)
+	want := []string{"--title", "wrkmon", "/opt/wrkmon-go"}
+	if len(args) != len(want) {
+		t.Fatalf("args = %v, want %v", args, want)
+	}
+	for i := range want {
+		if args[i] != want[i] {
+			t.Errorf("args[%d] = %s, want %s", i, args[i], want[i])
+		}
+	}
+}
+
+// TestShouldFallback pins the gating rule: only the "probe the table" cases
+// (no override, or the explicit "auto" override) may fall through to the
+// OS-level conhost/Terminal.app fallback. An explicit, unresolvable override
+// (e.g. a typo'd [window] terminal) must not be silently swallowed.
+func TestShouldFallback(t *testing.T) {
+	cases := []struct {
+		override string
+		want     bool
+	}{
+		{"", true},
+		{"auto", true},
+		{"kitty", false},
+		{"hyperterm", false},
+	}
+	for _, c := range cases {
+		if got := shouldFallback(c.override); got != c.want {
+			t.Errorf("shouldFallback(%q) = %v, want %v", c.override, got, c.want)
+		}
+	}
+}
+
 func TestResolveExtraArgs(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("linux/darwin table")
