@@ -25,6 +25,14 @@ for dir in /usr/local/bin "$HOME/.local/bin"; do
     fi
 done
 
+# Remove desktop entry + icon (Linux)
+rm -f "${HOME}/.local/share/applications/wrkmon-go.desktop" \
+      "${HOME}/.local/share/icons/hicolor/256x256/apps/wrkmon-go.png"
+command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "${HOME}/.local/share/applications" || true
+
+# Remove app bundle (macOS)
+rm -rf "${HOME}/Applications/wrkmon.app"
+
 # Remove config and data (ask first)
 echo ""
 info "Remove config and data? (~/.config/wrkmon-go and ~/.local/share/wrkmon-go)"

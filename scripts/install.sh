@@ -135,6 +135,45 @@ if ! check_dep yt-dlp; then
     esac
 fi
 
+# Desktop entry + icon (Linux only)
+if [ "$GOOS" = "linux" ]; then
+    info "Installing desktop entry..."
+    APP_DIR="${HOME}/.local/share/applications"
+    ICON_DIR="${HOME}/.local/share/icons/hicolor/256x256/apps"
+    mkdir -p "$APP_DIR" "$ICON_DIR"
+    RAW="https://raw.githubusercontent.com/${REPO}/main"
+    if curl -fsSL "${RAW}/assets/wrkmon-go.desktop" -o "${APP_DIR}/wrkmon-go.desktop" \
+       && curl -fsSL "${RAW}/assets/icon.png" -o "${ICON_DIR}/wrkmon-go.png"; then
+        command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APP_DIR" || true
+        ok "Desktop entry installed — find 'wrkmon' in your app launcher"
+    else
+        warn "Desktop entry download failed (app still works from the terminal)"
+    fi
+fi
+
+# App bundle (macOS only)
+if [ "$GOOS" = "darwin" ]; then
+    info "Installing app bundle..."
+    APP="${HOME}/Applications/wrkmon.app"
+    mkdir -p "${APP}/Contents/MacOS"
+    cat > "${APP}/Contents/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>CFBundleName</key><string>wrkmon</string>
+    <key>CFBundleIdentifier</key><string>com.umarkhan.wrkmon-go</string>
+    <key>CFBundleExecutable</key><string>wrkmon-launcher</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>
+EOF
+    cat > "${APP}/Contents/MacOS/wrkmon-launcher" <<EOF
+#!/bin/bash
+exec "${INSTALL_DIR}/${BINARY}" window
+EOF
+    chmod +x "${APP}/Contents/MacOS/wrkmon-launcher"
+    ok "App bundle installed at ~/Applications/wrkmon.app"
+fi
+
 echo ""
 if [ "$MISSING" -eq 0 ]; then
     ok "All dependencies satisfied!"

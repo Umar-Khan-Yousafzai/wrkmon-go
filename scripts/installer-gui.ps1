@@ -302,6 +302,7 @@ function Run-Install {
             $wsh = New-Object -ComObject WScript.Shell
             $sc  = $wsh.CreateShortcut($lnkPath)
             $sc.TargetPath = Join-Path $InstallDir $Binary
+            $sc.Arguments = "window"
             $sc.WorkingDirectory = $InstallDir
             $sc.Description = "wrkmon-go — YouTube TUI Player"
             $sc.Save()

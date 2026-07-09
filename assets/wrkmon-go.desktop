@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=wrkmon
+GenericName=YouTube Audio Player
+Comment=TUI YouTube audio player
+Exec=wrkmon-go window
+Icon=wrkmon-go
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=youtube;music;audio;tui;
+StartupWMClass=wrkmon-go

@@ -69,6 +69,9 @@ jobs:
             mkdir -p "${PKG}/DEBIAN" "${PKG}/usr/local/bin"
             cp "wrkmon-go-linux-${ARCH}" "${PKG}/usr/local/bin/wrkmon-go"
             chmod 755 "${PKG}/usr/local/bin/wrkmon-go"
+            mkdir -p "${PKG}/usr/share/applications" "${PKG}/usr/share/icons/hicolor/256x256/apps"
+            cp assets/wrkmon-go.desktop "${PKG}/usr/share/applications/wrkmon-go.desktop"
+            cp assets/icon.png "${PKG}/usr/share/icons/hicolor/256x256/apps/wrkmon-go.png"
             cat > "${PKG}/DEBIAN/control" << 'ENDCTRL'
           Package: wrkmon-go
           Version: VERSIONPLACEHOLDER
