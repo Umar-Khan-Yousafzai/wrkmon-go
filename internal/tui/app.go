@@ -6,14 +6,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/config"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/commands"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/components"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/theme"
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // activeView tracks which content is displayed.
@@ -52,14 +52,14 @@ func (v activeView) String() string {
 
 // App is the root Bubble Tea model.
 type App struct {
-	facade   *Facade
-	dispatch *commands.Dispatcher
-	prompt   components.Prompt
-	toast    components.Toast
+	facade    *Facade
+	dispatch  *commands.Dispatcher
+	prompt    components.Prompt
+	toast     components.Toast
 	statusBar components.StatusBar
-	theme    theme.Theme
-	styles   theme.Styles
-	cfg      config.Config
+	theme     theme.Theme
+	styles    theme.Styles
+	cfg       config.Config
 
 	// View state
 	currentView activeView
@@ -1336,6 +1336,7 @@ func (a *App) seekToColumn(x, barStart, barWidth int) tea.Cmd {
 	}
 	a.lastDragSeek = time.Now()
 	a.currentPos = clampPos(pct/100*a.currentDur, a.currentDur)
+	a.statusBar.SetPosition(a.currentPos, a.currentDur)
 	return a.toast.Show(fmt.Sprintf("⏩ %s / %s", formatSeconds(a.currentPos), formatSeconds(a.currentDur)), false)
 }
 
