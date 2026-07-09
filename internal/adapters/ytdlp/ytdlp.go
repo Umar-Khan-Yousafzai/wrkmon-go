@@ -19,17 +19,19 @@ var _ ports.Searcher = (*Client)(nil)
 
 // Client wraps yt-dlp subprocess calls.
 type Client struct {
-	binPath string // path to yt-dlp binary
-	bundled bool   // whether using the bundled binary
+	binPath    string // path to yt-dlp binary
+	bundled    bool   // whether the binary is wrkmon-owned (managed or bundled) and can self-update
+	managedDir string // where the auto-updater installs the managed copy
 }
 
 // NewClient creates a yt-dlp client using the locator precedence rule.
-func NewClient(configPath string) (*Client, error) {
-	result, err := Locate(configPath)
+// managedDir is where the auto-updater installs a wrkmon-owned copy.
+func NewClient(configPath, managedDir string) (*Client, error) {
+	result, err := Locate(configPath, managedDir)
 	if err != nil {
 		return nil, err
 	}
-	return &Client{binPath: result.Path, bundled: result.Bundled}, nil
+	return &Client{binPath: result.Path, bundled: result.Bundled, managedDir: managedDir}, nil
 }
 
 // BinPath returns the resolved yt-dlp binary path.

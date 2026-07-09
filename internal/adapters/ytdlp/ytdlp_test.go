@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewClient_NotFound(t *testing.T) {
-	_, err := NewClient("/nonexistent/path/to/yt-dlp-fake-binary")
+	_, err := NewClient("/nonexistent/path/to/yt-dlp-fake-binary", "")
 	if err == nil {
 		t.Fatal("expected error for non-existent binary, got nil")
 	}
@@ -19,7 +19,7 @@ func TestNewClient_FindsOnPath(t *testing.T) {
 		t.Skip("yt-dlp not installed, skipping")
 	}
 
-	client, err := NewClient("")
+	client, err := NewClient("", "")
 	if err != nil {
 		t.Fatalf("NewClient(\"\") failed: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestSearch_Integration(t *testing.T) {
 		t.Skip("yt-dlp not installed, skipping")
 	}
 
-	client, err := NewClient("")
+	client, err := NewClient("", "")
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestGetStreamURL_Integration(t *testing.T) {
 		t.Skip("yt-dlp not installed, skipping")
 	}
 
-	client, err := NewClient("")
+	client, err := NewClient("", "")
 	if err != nil {
 		t.Fatalf("NewClient: %v", err)
 	}

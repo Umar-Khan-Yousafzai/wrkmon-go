@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/mpv"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/store"
@@ -28,7 +29,7 @@ func main() {
 
 	cfg := config.Load()
 
-	searcher, err := ytdlp.NewClient(cfg.YtDlpPath)
+	searcher, err := ytdlp.NewClient(cfg.YtDlpPath, filepath.Join(config.DataDir(), "bin"))
 	if err != nil {
 		reportFatal("wrkmon-go: yt-dlp not found",
 			fmt.Sprintf("%v\n\nInstall wrkmon-go via the official installer to provision yt-dlp automatically, or place yt-dlp next to the wrkmon-go binary.", err))

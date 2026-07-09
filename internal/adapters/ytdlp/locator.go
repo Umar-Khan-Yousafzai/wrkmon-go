@@ -16,12 +16,13 @@ type LocateResult struct {
 	Source  string // human-readable description
 }
 
-// Locate finds the yt-dlp binary using the 4-tier precedence rule:
+// Locate finds the yt-dlp binary using the 5-tier precedence rule:
 //  1. Config override (explicit path or bare name)
-//  2. Bundled next to the wrkmon binary
-//  3. System PATH
-//  4. Error
-func Locate(configPath string) (LocateResult, error) {
+//  2. Managed copy in managedDir (installed by wrkmon's auto-updater)
+//  3. Bundled next to the wrkmon binary
+//  4. System PATH
+//  5. Error
+func Locate(configPath, managedDir string) (LocateResult, error) {
 	// 1. Config override
 	if configPath != "" {
 		if isPath(configPath) {
@@ -39,7 +40,19 @@ func Locate(configPath string) (LocateResult, error) {
 		return LocateResult{Path: p, Source: "config (PATH)"}, nil
 	}
 
-	// 2. Bundled next to wrkmon binary
+	// 2. Managed copy (wrkmon-owned, self-updatable)
+	if managedDir != "" {
+		managedName := "yt-dlp"
+		if runtime.GOOS == "windows" {
+			managedName = "yt-dlp.exe"
+		}
+		managedPath := filepath.Join(managedDir, managedName)
+		if _, err := os.Stat(managedPath); err == nil {
+			return LocateResult{Path: managedPath, Bundled: true, Source: "managed"}, nil
+		}
+	}
+
+	// 3. Bundled next to wrkmon binary
 	exe, err := os.Executable()
 	if err == nil {
 		exeDir := filepath.Dir(exe)
@@ -53,13 +66,13 @@ func Locate(configPath string) (LocateResult, error) {
 		}
 	}
 
-	// 3. System PATH
+	// 4. System PATH
 	p, err := exec.LookPath("yt-dlp")
 	if err == nil {
 		return LocateResult{Path: p, Source: "system PATH"}, nil
 	}
 
-	// 4. Not found
+	// 5. Not found
 	return LocateResult{}, fmt.Errorf("yt-dlp not found.\nInstall: pip install yt-dlp\n  Or place yt-dlp binary next to wrkmon-go")
 }
 
