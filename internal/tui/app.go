@@ -108,6 +108,10 @@ type App struct {
 
 	// One-time seek hint, shown on first playback of the session
 	seekHintShown bool
+
+	// Seekbar drag state
+	seekDragging bool
+	lastDragSeek time.Time
 }
 
 // NewApp creates the root TUI application.
@@ -425,6 +429,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		if cmd := a.handleMouse(msg); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return a, tea.Batch(cmds...)
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
@@ -1273,6 +1283,60 @@ func clampPos(pos, dur float64) float64 {
 		return dur
 	}
 	return pos
+}
+
+// handleMouse routes wheel scrolling and seekbar clicks/drags.
+func (a *App) handleMouse(msg tea.MouseMsg) tea.Cmd {
+	// Wheel: scroll the focused list.
+	if msg.Button == tea.MouseButtonWheelUp && msg.Action == tea.MouseActionPress {
+		a.moveCursorUp()
+		return nil
+	}
+	if msg.Button == tea.MouseButtonWheelDown && msg.Action == tea.MouseActionPress {
+		a.moveCursorDown()
+		return nil
+	}
+
+	// Statusbar seekbar. The status row sits directly above the prompt.
+	statusRow := a.height - lipgloss.Height(a.prompt.View()) - 1
+	barStart, barWidth, ok := a.statusBar.BarBounds()
+	onBar := ok && msg.Y == statusRow && msg.X >= barStart && msg.X < barStart+barWidth
+
+	switch {
+	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && onBar:
+		a.seekDragging = true
+		return a.seekToColumn(msg.X, barStart, barWidth)
+	case msg.Action == tea.MouseActionMotion && a.seekDragging:
+		if time.Since(a.lastDragSeek) >= 250*time.Millisecond {
+			return a.seekToColumn(msg.X, barStart, barWidth)
+		}
+	case msg.Action == tea.MouseActionRelease && a.seekDragging:
+		a.seekDragging = false
+		return a.seekToColumn(msg.X, barStart, barWidth)
+	}
+	return nil
+}
+
+// seekToColumn seeks to the position that column x represents on a bar
+// spanning [barStart, barStart+barWidth).
+func (a *App) seekToColumn(x, barStart, barWidth int) tea.Cmd {
+	if barWidth <= 0 || a.facade.State().Current == nil {
+		return nil
+	}
+	col := x - barStart
+	if col < 0 {
+		col = 0
+	}
+	if col >= barWidth {
+		col = barWidth - 1
+	}
+	pct := float64(col) / float64(barWidth-1) * 100
+	if err := a.facade.SeekPercent(pct); err != nil {
+		return a.toast.Show(err.Error(), true)
+	}
+	a.lastDragSeek = time.Now()
+	a.currentPos = clampPos(pct/100*a.currentDur, a.currentDur)
+	return a.toast.Show(fmt.Sprintf("⏩ %s / %s", formatSeconds(a.currentPos), formatSeconds(a.currentDur)), false)
 }
 
 func (a *App) moveCursorUp() {

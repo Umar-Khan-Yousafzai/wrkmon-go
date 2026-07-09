@@ -56,13 +56,9 @@ func (s *StatusBar) SetRepeatShuffle(repeat string, shuffle bool) {
 	s.shuffle = shuffle
 }
 
-// View renders the status bar.
-func (s StatusBar) View() string {
-	if s.width <= 0 {
-		return ""
-	}
-
-	left := ""
+// barLayout computes the rendered pieces and the mini-bar geometry.
+// ok is false when the bar is not drawn (stopped, or too narrow).
+func (s StatusBar) barLayout() (left, right string, barStart, barWidth int, ok bool) {
 	if s.state.Current != nil {
 		status := "\u25b6"
 		if s.state.Status == core.StatusPaused {
@@ -75,7 +71,6 @@ func (s StatusBar) View() string {
 		left = " \u25a0 Stopped"
 	}
 
-	// Build mode indicators
 	modes := ""
 	if s.repeatMode != "" && s.repeatMode != "off" {
 		modes += " \u21bb" + s.repeatMode
@@ -83,22 +78,37 @@ func (s StatusBar) View() string {
 	if s.shuffle {
 		modes += " \u21c4"
 	}
+	right = fmt.Sprintf("Vol: %d%%%s \u2502 %s ", s.state.Volume, modes, s.view)
 
-	right := fmt.Sprintf("Vol: %d%%%s \u2502 %s ", s.state.Volume, modes, s.view)
-
-	// Mini progress bar between left and right
 	gap := s.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap > 4 && s.state.Current != nil {
+		return left, right, lipgloss.Width(left) + 1, gap, true
+	}
+	return left, right, 0, 0, false
+}
+
+// BarBounds returns the column range [start, start+width) of the mini
+// progress bar on the status row, or ok=false if no bar is drawn.
+func (s StatusBar) BarBounds() (start, width int, ok bool) {
+	_, _, start, width, ok = s.barLayout()
+	return
+}
+
+// View renders the status bar.
+func (s StatusBar) View() string {
+	if s.width <= 0 {
+		return ""
+	}
+	left, right, _, gap, ok := s.barLayout()
+	if ok {
 		bar := miniBar(s.position, s.duration, gap)
 		return s.styles.StatusBar.Width(s.width).Render(left + " " + bar + " " + right)
 	}
-
-	gap = s.width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 0 {
-		gap = 0
+	pad := s.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if pad < 0 {
+		pad = 0
 	}
-	padding := strings.Repeat(" ", gap)
-	return s.styles.StatusBar.Width(s.width).Render(left + padding + right)
+	return s.styles.StatusBar.Width(s.width).Render(left + strings.Repeat(" ", pad) + right)
 }
 
 func miniBar(pos, dur float64, width int) string {
