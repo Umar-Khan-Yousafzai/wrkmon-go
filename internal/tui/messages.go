@@ -11,6 +11,14 @@ type SearchResultMsg struct {
 	Err     error
 }
 
+// SearchMoreMsg carries an infinite-scroll refetch. Results is the full
+// refetched prefix (from index 0) — the receiver dedupes against what it has.
+type SearchMoreMsg struct {
+	Results []core.SearchResult
+	Query   string
+	Err     error
+}
+
 // StreamURLMsg carries a resolved stream URL.
 type StreamURLMsg struct {
 	Track core.Track

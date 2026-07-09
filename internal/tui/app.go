@@ -29,6 +29,9 @@ const (
 	viewDownloads
 )
 
+// searchBatch is how many additional results each infinite-scroll fetch requests.
+const searchBatch = 25
+
 func (v activeView) String() string {
 	switch v {
 	case viewSearch:
@@ -70,6 +73,10 @@ type App struct {
 	searchResults []core.SearchResult
 	searchQuery   string
 	searchCursor  int
+
+	searchExhausted   bool // no more results available
+	searchLoadingMore bool // a refetch is in flight
+	searchFetchFailed bool // last refetch failed; retry on next bottom gesture
 
 	// Queue cursor for navigation
 	queueCursor int
@@ -515,7 +522,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "down":
 			if a.prompt.Value() == "" {
 				a.moveCursorDown()
-				return a, nil
+				if cmd := a.maybeLoadMore(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				return a, tea.Batch(cmds...)
 			}
 		case "enter":
 			if a.prompt.Value() == "" {
@@ -610,8 +620,35 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.searchQuery = msg.Query
 			a.searchCursor = 0
 			a.currentView = viewSearch
+			a.searchExhausted = false
+			a.searchLoadingMore = false
+			a.searchFetchFailed = false
 			if len(msg.Results) == 0 {
 				cmds = append(cmds, a.toast.Show("No results found", true))
+			}
+		}
+
+	case SearchMoreMsg:
+		a.searchLoadingMore = false
+		if msg.Query == a.searchQuery { // ignore stale responses
+			if msg.Err != nil {
+				a.searchFetchFailed = true
+				cmds = append(cmds, a.toast.Show("Load more failed: "+msg.Err.Error(), true))
+			} else {
+				merged, added := core.MergeResults(a.searchResults, msg.Results)
+				a.searchResults = merged
+				if added == 0 {
+					a.searchExhausted = true
+				} else {
+					a.facade.CacheSearch(context.Background(), a.searchQuery, merged)
+				}
+				max := a.cfg.MaxSearchResults
+				if max <= 0 {
+					max = 100
+				}
+				if len(merged) >= max {
+					a.searchExhausted = true
+				}
 			}
 		}
 
@@ -804,7 +841,7 @@ func (a *App) renderContent(height int) string {
 
 	switch a.currentView {
 	case viewSearch:
-		content = a.renderSearchView()
+		content = a.renderSearchView(height)
 	case viewQueue:
 		content = a.renderQueueView()
 	case viewHistory:
@@ -826,7 +863,7 @@ func (a *App) renderContent(height int) string {
 		Render(content)
 }
 
-func (a *App) renderSearchView() string {
+func (a *App) renderSearchView(height int) string {
 	if len(a.searchResults) == 0 && a.searchQuery == "" {
 		if a.loading {
 			return a.styles.Muted.Render("  Searching...")
@@ -858,24 +895,38 @@ func (a *App) renderSearchView() string {
 	b.WriteString(header)
 	b.WriteString("\n\n")
 
-	for i, r := range a.searchResults {
+	// Window the list so the cursor stays visible: header block above uses
+	// 2 rows, the footer hint 2, the sentinel 1.
+	listRows := height - 5
+	if listRows < 3 {
+		listRows = 3
+	}
+	start, end := core.VisibleRange(a.searchCursor, len(a.searchResults), listRows)
+	for i := start; i < end; i++ {
+		r := a.searchResults[i]
 		cursor := "  "
 		if i == a.searchCursor {
 			cursor = a.styles.Accent.Render("> ")
 		}
-
 		num := a.styles.Muted.Render(fmt.Sprintf("%2d. ", i+1))
 		dur := formatDuration(r.Duration)
-
 		title := r.Title
 		if i == a.searchCursor {
 			title = a.styles.Selected.Render(title)
 		}
-
 		channel := a.styles.Muted.Render(" - " + r.Channel)
 		duration := a.styles.Muted.Render(" [" + dur + "]")
-
 		b.WriteString(cursor + num + title + channel + duration + "\n")
+	}
+
+	// Sentinel row: fetch status at the bottom of the loaded list.
+	switch {
+	case a.searchLoadingMore:
+		b.WriteString(a.styles.Muted.Render("     … loading more") + "\n")
+	case a.searchFetchFailed:
+		b.WriteString(a.styles.Warning.Render("     fetch failed — scroll to retry") + "\n")
+	case a.searchExhausted && end == len(a.searchResults):
+		b.WriteString(a.styles.Muted.Render("     — end of results —") + "\n")
 	}
 
 	b.WriteString("\n")
@@ -1305,7 +1356,7 @@ func (a *App) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	}
 	if msg.Button == tea.MouseButtonWheelDown && msg.Action == tea.MouseActionPress {
 		a.moveCursorDown()
-		return nil
+		return a.maybeLoadMore()
 	}
 
 	// Statusbar seekbar. The status row sits directly above the prompt.
@@ -1424,6 +1475,43 @@ func (a *App) doSearch(query string) tea.Cmd {
 		results, err := a.facade.Search(context.Background(), query, limit)
 		return SearchResultMsg{Results: results, Query: query, Err: err}
 	}
+}
+
+func (a *App) doSearchMore(query string, fetchTotal int) tea.Cmd {
+	return func() tea.Msg {
+		results, err := a.facade.SearchMore(context.Background(), query, fetchTotal)
+		return SearchMoreMsg{Results: results, Query: query, Err: err}
+	}
+}
+
+// maybeLoadMore triggers a background refetch when the cursor nears the end
+// of the loaded results. Returns nil when no fetch is needed.
+func (a *App) maybeLoadMore() tea.Cmd {
+	if a.currentView != viewSearch || a.searchQuery == "" {
+		return nil
+	}
+	if a.searchLoadingMore || a.searchExhausted {
+		return nil
+	}
+	if a.searchCursor < len(a.searchResults)-3 {
+		return nil
+	}
+	// After a failure, only retry from the very last row (one retry per gesture).
+	if a.searchFetchFailed && a.searchCursor < len(a.searchResults)-1 {
+		return nil
+	}
+	a.searchFetchFailed = false
+	max := a.cfg.MaxSearchResults
+	if max <= 0 {
+		max = 100
+	}
+	next := core.NextFetchSize(len(a.searchResults), searchBatch, max)
+	if next == 0 {
+		a.searchExhausted = true
+		return nil
+	}
+	a.searchLoadingMore = true
+	return a.doSearchMore(a.searchQuery, next)
 }
 
 func (a *App) doPlayTrack(track core.Track) tea.Cmd {
