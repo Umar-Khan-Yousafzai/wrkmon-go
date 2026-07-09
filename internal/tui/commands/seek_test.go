@@ -25,6 +25,12 @@ func TestParseSeek(t *testing.T) {
 		{"150%", SeekSpec{}, true},    // percent must be 0–100
 		{"-1:00", SeekSpec{}, true},   // sign + colon form not allowed
 		{"-5", SeekSpec{SeekRelative, -5}, false},
+		{"nan", SeekSpec{}, true},
+		{"NaN%", SeekSpec{}, true},
+		{"inf", SeekSpec{}, true},
+		{"-inf", SeekSpec{}, true},
+		{"+Inf", SeekSpec{}, true},
+		{"+1:00", SeekSpec{}, true}, // sign + colon form not allowed
 	}
 	for _, c := range cases {
 		got, err := ParseSeek(c.in)

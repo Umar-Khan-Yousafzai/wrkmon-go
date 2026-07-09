@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -21,6 +22,11 @@ type SeekSpec struct {
 	Value float64
 }
 
+// finite reports whether v is a normal, finite number.
+func finite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
 // ParseSeek parses a /seek argument. Accepted forms:
 //
 //	1:23  01:02:03   absolute mm:ss or h:mm:ss
@@ -36,7 +42,7 @@ func ParseSeek(arg string) (SeekSpec, error) {
 	// Relative: leading sign.
 	if arg[0] == '+' || arg[0] == '-' {
 		v, err := strconv.ParseFloat(arg, 64)
-		if err != nil {
+		if err != nil || !finite(v) {
 			return SeekSpec{}, fmt.Errorf("bad relative offset %q", arg)
 		}
 		return SeekSpec{SeekRelative, v}, nil
@@ -45,7 +51,7 @@ func ParseSeek(arg string) (SeekSpec, error) {
 	// Percent: trailing %.
 	if strings.HasSuffix(arg, "%") {
 		v, err := strconv.ParseFloat(strings.TrimSuffix(arg, "%"), 64)
-		if err != nil || v < 0 || v > 100 {
+		if err != nil || !finite(v) || v < 0 || v > 100 {
 			return SeekSpec{}, fmt.Errorf("percent must be 0–100")
 		}
 		return SeekSpec{SeekPct, v}, nil
@@ -74,7 +80,7 @@ func ParseSeek(arg string) (SeekSpec, error) {
 
 	// Plain seconds.
 	v, err := strconv.ParseFloat(arg, 64)
-	if err != nil || v < 0 {
+	if err != nil || !finite(v) || v < 0 {
 		return SeekSpec{}, fmt.Errorf("bad seek target %q", arg)
 	}
 	return SeekSpec{SeekAbsolute, v}, nil
