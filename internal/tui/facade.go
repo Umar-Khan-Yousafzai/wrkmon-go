@@ -353,15 +353,21 @@ func (f *Facade) ListDownloads(ctx context.Context, limit int) ([]core.Download,
 	return f.store.ListDownloads(ctx, limit)
 }
 
-// UpdateYtDlp runs yt-dlp self-update if using bundled binary.
+// UpdateYtDlp brings yt-dlp up to date (self-update or managed migration).
 func (f *Facade) UpdateYtDlp(ctx context.Context) (string, error) {
-	type updater interface {
-		Update(ctx context.Context) (string, error)
+	msg, _, err := f.EnsureLatestYtDlp(ctx)
+	return msg, err
+}
+
+// EnsureLatestYtDlp exposes the searcher's EnsureLatest when supported.
+func (f *Facade) EnsureLatestYtDlp(ctx context.Context) (string, bool, error) {
+	type ensurer interface {
+		EnsureLatest(ctx context.Context) (string, bool, error)
 	}
-	if u, ok := f.searcher.(updater); ok {
-		return u.Update(ctx)
+	if e, ok := f.searcher.(ensurer); ok {
+		return e.EnsureLatest(ctx)
 	}
-	return "yt-dlp update not supported with this searcher", nil
+	return "yt-dlp update not supported with this searcher", false, nil
 }
 
 // Close shuts down all adapters.
