@@ -112,6 +112,13 @@ type App struct {
 	// Seekbar drag state
 	seekDragging bool
 	lastDragSeek time.Time
+	dragStart    int
+	dragWidth    int
+
+	// Now-playing big bar geometry, captured at render time
+	npBarRow   int
+	npBarStart int
+	npBarWidth int
 }
 
 // NewApp creates the root TUI application.
@@ -952,6 +959,7 @@ func (a *App) renderHistoryView() string {
 func (a *App) renderNowPlayingView() string {
 	state := a.facade.State()
 	if state.Current == nil {
+		a.npBarWidth = 0
 		return a.styles.Muted.Render("  Nothing playing.\n\n  Search for music to get started.")
 	}
 
@@ -988,6 +996,9 @@ func (a *App) renderNowPlayingView() string {
 		barWidth = 10
 	}
 	bar := progressBar(a.currentPos, a.currentDur, barWidth)
+	a.npBarRow = strings.Count(b.String(), "\n") // row index of the bar line
+	a.npBarStart = 2
+	a.npBarWidth = barWidth
 	b.WriteString("  " + a.styles.Accent.Render(bar))
 	b.WriteString("\n")
 
@@ -1302,17 +1313,28 @@ func (a *App) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	barStart, barWidth, ok := a.statusBar.BarBounds()
 	onBar := ok && msg.Y == statusRow && msg.X >= barStart && msg.X < barStart+barWidth
 
+	// Now-playing big bar. Only clickable when that view is showing and no
+	// overlay (help/lyrics) is covering it.
+	onNpBar := a.currentView == viewNowPlaying && a.helpText == "" && a.lyricsText == "" &&
+		a.npBarWidth > 0 && msg.Y == a.npBarRow &&
+		msg.X >= a.npBarStart && msg.X < a.npBarStart+a.npBarWidth
+
 	switch {
 	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && onBar:
 		a.seekDragging = true
+		a.dragStart, a.dragWidth = barStart, barWidth
 		return a.seekToColumn(msg.X, barStart, barWidth)
+	case msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && onNpBar:
+		a.seekDragging = true
+		a.dragStart, a.dragWidth = a.npBarStart, a.npBarWidth
+		return a.seekToColumn(msg.X, a.npBarStart, a.npBarWidth)
 	case msg.Action == tea.MouseActionMotion && a.seekDragging:
 		if time.Since(a.lastDragSeek) >= 250*time.Millisecond {
-			return a.seekToColumn(msg.X, barStart, barWidth)
+			return a.seekToColumn(msg.X, a.dragStart, a.dragWidth)
 		}
 	case msg.Action == tea.MouseActionRelease && a.seekDragging:
 		a.seekDragging = false
-		return a.seekToColumn(msg.X, barStart, barWidth)
+		return a.seekToColumn(msg.X, a.dragStart, a.dragWidth)
 	}
 	return nil
 }
