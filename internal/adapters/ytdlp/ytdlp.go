@@ -24,6 +24,8 @@ type Client struct {
 	binPath    string // path to yt-dlp binary
 	bundled    bool   // whether the binary is wrkmon-owned (managed or bundled) and can self-update
 	managedDir string // where the auto-updater installs the managed copy
+
+	updateMu sync.Mutex // serializes EnsureLatest end-to-end
 }
 
 // NewClient creates a yt-dlp client using the locator precedence rule.

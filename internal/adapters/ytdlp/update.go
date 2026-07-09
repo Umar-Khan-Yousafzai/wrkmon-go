@@ -45,6 +45,10 @@ func assetNameFor(goos, goarch string) string {
 //
 // Returns a human-readable message and whether anything changed.
 func (c *Client) EnsureLatest(ctx context.Context) (string, bool, error) {
+	c.updateMu.Lock()
+	defer c.updateMu.Unlock()
+	// Re-check after acquiring the lock: a concurrent caller may have
+	// migrated to the managed copy while we waited.
 	if c.selfUpdatable() {
 		return c.selfUpdate(ctx)
 	}
