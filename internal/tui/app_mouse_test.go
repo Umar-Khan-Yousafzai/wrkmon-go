@@ -160,3 +160,117 @@ func TestMouseSeekbarClickSyncsStatusBar(t *testing.T) {
 		t.Errorf("app.currentPos = %.2f, want ~%.2f", app.currentPos, wantPos)
 	}
 }
+
+// newNowPlayingApp spins up an App on the now-playing view with a playing
+// track and one rendered frame, so the big bar's geometry has been captured.
+func newNowPlayingApp(t *testing.T) (*App, *mousePlayer) {
+	t.Helper()
+
+	player := &mousePlayer{}
+	f := NewFacade(mouseSearcher{}, player, mouseStore{})
+
+	if err := f.PlayTrack(context.Background(), core.Track{
+		VideoID:  "v",
+		Title:    "x",
+		Duration: 100 * time.Second,
+	}); err != nil {
+		t.Fatalf("PlayTrack: %v", err)
+	}
+
+	app := NewApp(f, config.DefaultConfig())
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	app.currentView = viewNowPlaying
+	app.Update(PositionUpdateMsg{Position: 10, Duration: 100})
+
+	// Render the now-playing view so the bar geometry is captured.
+	_ = app.View()
+
+	if app.npBarWidth <= 0 {
+		t.Fatalf("expected npBarWidth > 0 after render, got %d", app.npBarWidth)
+	}
+	return app, player
+}
+
+// TestMouseNowPlayingBarClickAndOverlayGating clicks the big now-playing
+// progress bar and asserts the seek lands near the expected percentage,
+// then opens the help overlay and asserts the same click no longer seeks
+// (the overlay covers the bar, so its stale geometry must not be clickable).
+func TestMouseNowPlayingBarClickAndOverlayGating(t *testing.T) {
+	app, player := newNowPlayingApp(t)
+
+	clickX := app.npBarStart + app.npBarWidth/2
+	app.Update(tea.MouseMsg{
+		X:      clickX,
+		Y:      app.npBarRow,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+	})
+
+	if player.lastPct < 48 || player.lastPct > 52 {
+		t.Errorf("SeekPercent called with %.2f, want ~50", player.lastPct)
+	}
+
+	// Release to end the drag started by the press above.
+	app.Update(tea.MouseMsg{
+		X:      clickX,
+		Y:      app.npBarRow,
+		Action: tea.MouseActionRelease,
+		Button: tea.MouseButtonLeft,
+	})
+
+	// With the help overlay open, the same click must NOT seek.
+	player.lastPct = -1
+	app.helpText = "help"
+	app.Update(tea.MouseMsg{
+		X:      clickX,
+		Y:      app.npBarRow,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+	})
+	if player.lastPct != -1 {
+		t.Errorf("expected no seek while help overlay open, got %.2f", player.lastPct)
+	}
+}
+
+// TestMouseNowPlayingBarDragUsesCapturedGeometry presses on the big bar and
+// then drags to its last column, asserting the motion seek maps against the
+// geometry captured at press time (dragStart/dragWidth), not the statusbar's.
+func TestMouseNowPlayingBarDragUsesCapturedGeometry(t *testing.T) {
+	app, player := newNowPlayingApp(t)
+
+	app.Update(tea.MouseMsg{
+		X:      app.npBarStart,
+		Y:      app.npBarRow,
+		Action: tea.MouseActionPress,
+		Button: tea.MouseButtonLeft,
+	})
+
+	if !app.seekDragging {
+		t.Fatal("press on now-playing bar did not start a drag")
+	}
+	if app.dragStart != app.npBarStart || app.dragWidth != app.npBarWidth {
+		t.Errorf("press captured dragStart/dragWidth = %d/%d, want %d/%d",
+			app.dragStart, app.dragWidth, app.npBarStart, app.npBarWidth)
+	}
+
+	player.lastPct = -1
+	app.lastDragSeek = time.Time{} // bypass the 250ms drag throttle
+	app.Update(tea.MouseMsg{
+		X:      app.npBarStart + app.npBarWidth - 1,
+		Y:      app.npBarRow,
+		Action: tea.MouseActionMotion,
+	})
+	if player.lastPct < 98 {
+		t.Errorf("expected drag to seek near 100%%, got %.2f", player.lastPct)
+	}
+
+	app.Update(tea.MouseMsg{
+		X:      app.npBarStart + app.npBarWidth - 1,
+		Y:      app.npBarRow,
+		Action: tea.MouseActionRelease,
+		Button: tea.MouseButtonLeft,
+	})
+	if app.seekDragging {
+		t.Error("seekDragging still true after release")
+	}
+}
