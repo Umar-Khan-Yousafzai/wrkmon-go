@@ -105,6 +105,9 @@ type App struct {
 
 	// Help text display
 	helpText string
+
+	// One-time seek hint, shown on first playback of the session
+	seekHintShown bool
 }
 
 // NewApp creates the root TUI application.
@@ -135,6 +138,7 @@ func (a *App) buildCommands() *commands.Dispatcher {
 				"  Space          Toggle pause/resume\n" +
 				"  Ctrl+P         Toggle pause (works while typing)\n" +
 				"  Left/Right     Seek -/+ 5 seconds\n" +
+				"  Shift+←/→      Seek -/+ 30 seconds\n" +
 				"  +/-            Volume up/down\n" +
 				"  n/p            Next/previous track\n" +
 				"  a              Add to queue (search view)\n" +
@@ -226,6 +230,14 @@ func (a *App) buildCommands() *commands.Dispatcher {
 			a.cfg.Volume = a.facade.State().Volume
 			_ = config.Save(a.cfg)
 			return fmt.Sprintf("Volume: %d%%", vol), nil
+		},
+	})
+
+	d.Register(commands.Command{
+		Name:        "/seek",
+		Description: "Seek: /seek 1:23 | 83 | 50% | +30 | -30",
+		Handler: func(args string) (string, error) {
+			return a.execSeek(args)
 		},
 	})
 
@@ -439,15 +451,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "left":
 			// Seek backward 5s when prompt is empty
 			if a.prompt.Value() == "" {
-				_ = a.facade.Seek(-5)
-				return a, nil
+				cmds = append(cmds, a.seekRelativeKey(-5))
+				return a, tea.Batch(cmds...)
 			}
 		case "right":
 			// Seek forward 5s when prompt is empty
 			if a.prompt.Value() == "" {
-				_ = a.facade.Seek(5)
-				return a, nil
+				cmds = append(cmds, a.seekRelativeKey(5))
+				return a, tea.Batch(cmds...)
 			}
+		case "shift+left":
+			cmds = append(cmds, a.seekRelativeKey(-30))
+			return a, tea.Batch(cmds...)
+		case "shift+right":
+			cmds = append(cmds, a.seekRelativeKey(30))
+			return a, tea.Batch(cmds...)
 		case "+", "=":
 			if a.prompt.Value() == "" {
 				_ = a.facade.VolumeUp()
@@ -585,6 +603,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.currentDur = msg.Track.Duration.Seconds()
 		a.statusBar.SetState(a.facade.State())
 		cmds = append(cmds, a.toast.Show("Now playing: "+msg.Track.Title, false))
+		if !a.seekHintShown {
+			a.seekHintShown = true
+			cmds = append(cmds, a.toast.Show("Seek: ←/→ 5s · Shift ±30s · /seek 1:23 · click the bar", false))
+		}
 		cmds = append(cmds, a.tickPosition())
 
 	case PlaybackStoppedMsg:
@@ -1200,6 +1222,57 @@ func (a *App) handleEnterOnList() tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// execSeek applies a parsed /seek argument and returns the toast text.
+func (a *App) execSeek(args string) (string, error) {
+	if a.facade.State().Current == nil {
+		return "", fmt.Errorf("nothing playing")
+	}
+	spec, err := commands.ParseSeek(args)
+	if err != nil {
+		return "", fmt.Errorf("usage: /seek 1:23 | 83 | 50%% | +30 | -30 (%v)", err)
+	}
+	var target float64
+	switch spec.Kind {
+	case commands.SeekAbsolute:
+		target = spec.Value
+		err = a.facade.SeekTo(spec.Value)
+	case commands.SeekPct:
+		target = spec.Value / 100 * a.currentDur
+		err = a.facade.SeekPercent(spec.Value)
+	case commands.SeekRelative:
+		target = a.currentPos + spec.Value
+		err = a.facade.Seek(spec.Value)
+	}
+	if err != nil {
+		return "", err
+	}
+	a.currentPos = clampPos(target, a.currentDur)
+	return fmt.Sprintf("⏩ %s / %s", formatSeconds(a.currentPos), formatSeconds(a.currentDur)), nil
+}
+
+// seekRelativeKey seeks by delta seconds and returns a toast command.
+func (a *App) seekRelativeKey(delta float64) tea.Cmd {
+	if a.facade.State().Current == nil {
+		return nil
+	}
+	if err := a.facade.Seek(delta); err != nil {
+		return a.toast.Show(err.Error(), true)
+	}
+	a.currentPos = clampPos(a.currentPos+delta, a.currentDur)
+	return a.toast.Show(fmt.Sprintf("⏩ %s / %s", formatSeconds(a.currentPos), formatSeconds(a.currentDur)), false)
+}
+
+// clampPos clamps a seek target into [0, dur] (dur 0 = unknown, only floor).
+func clampPos(pos, dur float64) float64 {
+	if pos < 0 {
+		return 0
+	}
+	if dur > 0 && pos > dur {
+		return dur
+	}
+	return pos
 }
 
 func (a *App) moveCursorUp() {
