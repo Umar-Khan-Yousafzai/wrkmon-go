@@ -11,9 +11,9 @@ import (
 
 // LocateResult describes which yt-dlp binary was found and how.
 type LocateResult struct {
-	Path     string
-	Bundled  bool   // true if found next to the wrkmon binary
-	Source   string // human-readable description
+	Path    string
+	Bundled bool   // true if found next to the wrkmon binary
+	Source  string // human-readable description
 }
 
 // Locate finds the yt-dlp binary using the 4-tier precedence rule:

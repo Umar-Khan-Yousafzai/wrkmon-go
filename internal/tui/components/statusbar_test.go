@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/theme"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func playingBar(width int) StatusBar {

@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/theme"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // StatusBar shows playback information at the bottom.

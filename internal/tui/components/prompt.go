@@ -1,10 +1,10 @@
 package components
 
 import (
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/theme"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/theme"
 )
 
 // PromptSubmitMsg is sent when the user presses Enter.

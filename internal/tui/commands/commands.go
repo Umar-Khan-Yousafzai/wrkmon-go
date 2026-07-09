@@ -13,8 +13,8 @@ type Handler func(args string) (string, error)
 
 // Command describes a registered slash command.
 type Command struct {
-	Name        string  // e.g. "/search"
-	Description string  // short help text
+	Name        string // e.g. "/search"
+	Description string // short help text
 	Handler     Handler
 	Hidden      bool // if true, don't show in /help
 }

@@ -3,9 +3,9 @@ package components
 import (
 	"time"
 
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/theme"
 )
 
 type toastDoneMsg struct{}

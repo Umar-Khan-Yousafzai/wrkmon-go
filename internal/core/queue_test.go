@@ -7,12 +7,12 @@ import (
 
 func makeTrack(id, title string) Track {
 	return Track{
-		ID:      id,
-		VideoID: "dQw4w9WgXcQ",
-		Title:   title,
-		Channel: "TestChannel",
+		ID:       id,
+		VideoID:  "dQw4w9WgXcQ",
+		Title:    title,
+		Channel:  "TestChannel",
 		Duration: 3 * time.Minute,
-		AddedAt: time.Now(),
+		AddedAt:  time.Now(),
 	}
 }
 

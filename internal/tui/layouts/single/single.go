@@ -1,8 +1,8 @@
 package single
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/layouts"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // Layout implements the single-pane layout.

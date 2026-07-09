@@ -111,10 +111,10 @@ func TestGetHistory_LimitAndOffset(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		limit    int
-		offset   int
-		wantLen  int
+		name      string
+		limit     int
+		offset    int
+		wantLen   int
 		wantFirst string // expected title of first result (most recent)
 	}{
 		{"all", 10, 0, 5, "Song E"},
