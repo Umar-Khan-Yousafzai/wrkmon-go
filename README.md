@@ -4,6 +4,15 @@ A blazing fast TUI YouTube audio player built with Go and Bubble Tea. Search You
 
 > v2.0 — Go rewrite of [wrkmon](https://github.com/Umar-Khan-Yousafzai/Wrkmon-TUI-Youtube)
 
+## Features
+
+- **Search & queue** — search YouTube, queue results, play/pause/seek/skip, history and playlists.
+- **Downloads & lyrics** — save tracks as MP3, fetch lyrics for the current track.
+- **18-band equalizer** — presets (`bass`, `flat`, `pop`, `rock`, `treble`, `vocal`) or per-band custom gains, applied live via mpv, persisted across restarts. See `/eq` below.
+- **Focus mode** — `/focus` swaps the whole screen for a fake htop/build-log/test-runner overlay (v1-style disguise); music keeps playing underneath, any key brings the player back.
+- **Media keys** — hardware Play/Pause/Next/Prev control the player. Full support on Linux (MPRIS, works with `playerctl` and desktop widgets); Windows registers the media hotkeys (play/pause/next/prev); macOS gets play/pause via mpv's own media-key passthrough. Opt out with `media_keys = false` in config.
+- **`--version`** — `wrkmon-go --version` (or `-v` / `version`) prints the build version and exits immediately.
+
 ## Install
 
 ### Linux (one-liner)
@@ -78,6 +87,10 @@ Type to search YouTube. Use `/help` to see all commands.
 | `/vol <0-100>` | Set volume |
 | `/theme [name]` | Switch theme |
 | `/clear` | Clear queue |
+| `/lyrics` | Show lyrics for the current track |
+| `/download [list]` | Download current track as MP3, or list downloads |
+| `/eq [preset\|off\|show\|band <1-18> <dB>]` | Equalizer: apply a preset, disable, show status, or set one band's gain |
+| `/focus` | Fake work-screen overlay; any key returns |
 | `/help` | Show help |
 
 ### Themes
@@ -85,6 +98,35 @@ Type to search YouTube. Use `/help` to see all commands.
 Three built-in themes: `opencode-mono` (default), `github-dark`, `warm-minimal`.
 
 Switch with `/theme <name>`.
+
+### Equalizer
+
+18-band EQ backed by mpv's `superequalizer` audio filter:
+
+```
+/eq bass            # apply the bass preset (also: flat, pop, rock, treble, vocal)
+/eq show             # show the active preset (or custom bands) and enabled state
+/eq band 3 4.5       # set band 3 to +4.5 dB — switches to "custom"
+/eq off              # disable EQ processing (settings are kept, not cleared)
+```
+
+Settings persist across restarts (`eq_preset`, `eq_gains`, `eq_enabled` in the config file).
+
+### Focus Mode
+
+`/focus` replaces the whole screen with a fake dev-tool overlay (a process monitor, a build log, or a test runner — picked at random), v1-style. Music keeps playing behind it. Press any key (other than Ctrl+C, which still quits) to return to the player — the overlay itself carries no track info, so it can't be dismissed by typing another `/focus`.
+
+### Media Keys
+
+Hardware media keys drive playback when available:
+
+| Platform | Support |
+|----------|---------|
+| Linux | Full — MPRIS over D-Bus (`org.mpris.MediaPlayer2.wrkmon_go`); works with `playerctl`, GNOME/KDE media widgets, etc. |
+| Windows | Play/Pause/Next/Prev via `RegisterHotKey`; no now-playing metadata surface (no SMTC). |
+| macOS | Play/Pause only, via mpv's own `--input-media-keys=yes`; Next/Prev are not queue-aware on this platform. |
+
+Set `media_keys = false` in the config file to opt out.
 
 ## Uninstall
 
