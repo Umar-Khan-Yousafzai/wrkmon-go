@@ -11,12 +11,16 @@ import (
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/config"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/components"
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/focus"
 )
 
 // focusMarkers are substrings unique to each fake /focus screen kind (see
-// internal/tui/focus.Render's htop/build-log/test-runner outputs). A view
-// containing any one of these is displaying the overlay, not the normal
-// player UI.
+// internal/tui/focus.Render's htop/build-log/test-runner outputs). They are
+// only safe as an ABSENCE check (the normal player UI never contains any of
+// them): presence is NOT guaranteed for every kind at tick 0 — the
+// test-runner screen reveals only its pytest session header at first, with
+// no "PASSED" line yet — so activation tests must pin app.focusKind to a
+// known kind instead of asserting "any marker".
 var focusMarkers = []string{"Load average", "Compiling", "PASSED"}
 
 const focusTestTrackTitle = "My Distinctive Focus Test Track"
@@ -70,9 +74,19 @@ func TestFocusSubmitActivatesOverlayAndHidesTrackTitle(t *testing.T) {
 
 	activateFocus(t, app)
 
+	// /focus picks a RANDOM kind with a time-based seed, and not every
+	// kind shows a stable marker at tick 0 (the test-runner screen's
+	// first 8 revealed lines are pytest session header only — no
+	// "PASSED" yet), which made a marker-for-any-kind assertion flake.
+	// Pin the kind/seed to htop, which renders its full screen —
+	// including "Load average" — on every tick, so the assertion is
+	// deterministic while still exercising the real View() overlay path.
+	app.focusKind = focus.KindHtop
+	app.focusSeed = 42
+
 	view := app.View()
-	if !containsAnyMarker(view) {
-		t.Errorf("View() = %q, want it to contain one of the fake markers %v", view, focusMarkers)
+	if !strings.Contains(view, "Load average") {
+		t.Errorf("View() = %q, want the pinned htop overlay marker \"Load average\"", view)
 	}
 	if strings.Contains(view, focusTestTrackTitle) {
 		t.Errorf("View() = %q, should not leak the track title while focus is active", view)
