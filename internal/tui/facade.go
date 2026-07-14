@@ -193,6 +193,12 @@ func (f *Facade) SetVolume(vol int) error {
 	return nil
 }
 
+// SetAudioFilter sets (or clears, with "") the player's audio filter chain
+// (used for the equalizer).
+func (f *Facade) SetAudioFilter(filter string) error {
+	return f.player.SetAudioFilter(filter)
+}
+
 // VolumeUp increases volume by 5.
 func (f *Facade) VolumeUp() error {
 	return f.SetVolume(f.state.Volume + 5)

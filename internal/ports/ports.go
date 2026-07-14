@@ -23,6 +23,7 @@ type Player interface {
 	SeekTo(seconds float64) error
 	SeekPercent(pct float64) error
 	SetVolume(vol int) error
+	SetAudioFilter(filter string) error
 	GetPosition() (float64, error)
 	GetDuration() (float64, error)
 	IsRunning() bool

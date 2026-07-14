@@ -31,6 +31,7 @@ func (p *mousePlayer) SeekPercent(pct float64) error {
 	return nil
 }
 func (p *mousePlayer) SetVolume(vol int) error       { return nil }
+func (p *mousePlayer) SetAudioFilter(f string) error { return nil }
 func (p *mousePlayer) GetPosition() (float64, error) { return 0, nil }
 func (p *mousePlayer) GetDuration() (float64, error) { return 0, nil }
 func (p *mousePlayer) IsRunning() bool               { return true }

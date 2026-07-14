@@ -190,6 +190,12 @@ func (m *MPV) SetVolume(vol int) error {
 	return err
 }
 
+// SetAudioFilter sets (or clears, with "") the mpv audio filter chain.
+func (m *MPV) SetAudioFilter(filter string) error {
+	_, err := m.command("set_property", "af", filter)
+	return err
+}
+
 // GetPosition returns the current playback position in seconds.
 func (m *MPV) GetPosition() (float64, error) {
 	resp, err := m.command("get_property", "time-pos")
