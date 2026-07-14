@@ -74,6 +74,12 @@ type App struct {
 	styles    theme.Styles
 	cfg       config.Config
 
+	// remote is the injected hardware media-key port (see core.MediaRemote
+	// and internal/adapters/mediakeys). nil when no remote was supplied to
+	// NewApp or when config.MediaKeys is false — every remote-related
+	// method on App is nil-safe and becomes a no-op in that case.
+	remote core.MediaRemote
+
 	// View state
 	currentView activeView
 	width       int
@@ -151,8 +157,12 @@ type App struct {
 	focusGen    int
 }
 
-// NewApp creates the root TUI application.
-func NewApp(facade *Facade, cfg config.Config) *App {
+// NewApp creates the root TUI application. remote is optional and variadic
+// so every existing NewApp(facade, cfg) call site keeps compiling unchanged:
+// pass a core.MediaRemote to wire hardware media-key commands, or omit it
+// (or pass nil) to run with remote handling fully inert — see the remote
+// field and firstRemote.
+func NewApp(facade *Facade, cfg config.Config, remote ...core.MediaRemote) *App {
 	t := theme.Get(cfg.Theme)
 	app := &App{
 		facade:      facade,
@@ -163,9 +173,19 @@ func NewApp(facade *Facade, cfg config.Config) *App {
 		toast:       components.NewToast(t),
 		statusBar:   components.NewStatusBar(t),
 		autoAdvance: true,
+		remote:      firstRemote(remote),
 	}
 	app.dispatch = app.buildCommands()
 	return app
+}
+
+// firstRemote extracts the first MediaRemote passed to NewApp's variadic
+// remote parameter, or nil if none was supplied.
+func firstRemote(remotes []core.MediaRemote) core.MediaRemote {
+	if len(remotes) > 0 {
+		return remotes[0]
+	}
+	return nil
 }
 
 func (a *App) buildCommands() *commands.Dispatcher {
@@ -226,6 +246,7 @@ func (a *App) buildCommands() *commands.Dispatcher {
 			if err := a.facade.TogglePause(); err != nil {
 				return "", err
 			}
+			a.publishNowPlaying()
 			return "", nil
 		},
 	})
@@ -237,6 +258,7 @@ func (a *App) buildCommands() *commands.Dispatcher {
 			if err := a.facade.Stop(); err != nil {
 				return "", err
 			}
+			a.publishNowPlaying()
 			return "", nil
 		},
 	})
@@ -540,6 +562,9 @@ func (a *App) Init() tea.Cmd {
 	if a.cfg.AutoUpdateYtDlp {
 		cmds = append(cmds, a.doAutoUpdateYtDlp())
 	}
+	if cmd := a.remoteListenCmd(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -586,6 +611,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					cmds = append(cmds, a.toast.Show(err.Error(), true))
 				}
 				a.statusBar.SetState(a.facade.State())
+				a.publishNowPlaying()
 				return a, tea.Batch(cmds...)
 			}
 		case "ctrl+p":
@@ -593,6 +619,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, a.toast.Show(err.Error(), true))
 			}
 			a.statusBar.SetState(a.facade.State())
+			a.publishNowPlaying()
 			return a, tea.Batch(cmds...)
 		case "left":
 			// Seek backward 5s when prompt is empty
@@ -727,6 +754,32 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 		a.statusBar.SetWidth(msg.Width)
 
+	case remoteCmdMsg:
+		// Mirror the keyboard equivalents exactly: Space -> TogglePause,
+		// n -> NextTrack, p -> PreviousTrack, and RemoteStop -> facade.Stop.
+		switch msg.cmd {
+		case core.RemotePlayPause:
+			if err := a.facade.TogglePause(); err != nil {
+				cmds = append(cmds, a.toast.Show(err.Error(), true))
+			}
+			a.publishNowPlaying()
+		case core.RemoteNext:
+			cmds = append(cmds, a.doNextTrack())
+		case core.RemotePrev:
+			cmds = append(cmds, a.doPrevTrack())
+		case core.RemoteStop:
+			if err := a.facade.Stop(); err != nil {
+				cmds = append(cmds, a.toast.Show(err.Error(), true))
+			}
+			a.currentPos = 0
+			a.currentDur = 0
+			a.publishNowPlaying()
+		}
+		// Re-arm: keep exactly one listen in flight.
+		if cmd := a.remoteListenCmd(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+
 	case focusTickMsg:
 		// Only a tick from the CURRENT session (matching generation) may
 		// advance the animation and reschedule. A stale tick — left in
@@ -798,9 +851,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, a.toast.Show("Seek: ←/→ 5s · Shift ±30s · /seek 1:23 · click the bar", false))
 		}
 		cmds = append(cmds, a.tickPosition())
+		a.publishNowPlaying()
 
 	case PlaybackStoppedMsg:
 		a.statusBar.SetState(a.facade.State())
+		a.publishNowPlaying()
 
 	case PlaybackErrorMsg:
 		a.loading = false
@@ -840,6 +895,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.currentPos = 0
 				a.currentDur = 0
 				cmds = append(cmds, a.toast.Show("Queue finished", false))
+				a.publishNowPlaying()
 			}
 		}
 
@@ -1879,6 +1935,69 @@ func (a *App) tickPosition() tea.Cmd {
 		dur, _ := a.facade.GetDuration()
 		return PositionUpdateMsg{Position: pos, Duration: dur}
 	})
+}
+
+// remoteCmdMsg carries one command received from the injected
+// core.MediaRemote (hardware media keys / OS media-session controls). See
+// the remoteCmdMsg case in Update for how each core.RemoteCommand is
+// dispatched — identically to its keyboard equivalent.
+type remoteCmdMsg struct {
+	cmd core.RemoteCommand
+}
+
+// remoteListenCmd returns the tea.Cmd that starts (or re-arms) the remote
+// command listen loop, or nil when disabled: config.MediaKeys is false, or
+// no remote was ever passed to NewApp. Used by Init (initial start) and the
+// remoteCmdMsg handler (re-arm after each command) so both honor the same
+// gate.
+func (a *App) remoteListenCmd() tea.Cmd {
+	if !a.cfg.MediaKeys {
+		return nil
+	}
+	return a.listenRemote()
+}
+
+// listenRemote waits for exactly one command from the injected MediaRemote
+// and wraps it as a remoteCmdMsg. Update re-issues listenRemote() after
+// handling the resulting message, keeping exactly one blocking read in
+// flight — the same one-shot-then-reschedule shape as tickPosition's Tick
+// loop. Nil-safe: returns a nil tea.Cmd when no remote is wired (including
+// when config.MediaKeys is false), so it never blocks startup.
+func (a *App) listenRemote() tea.Cmd {
+	if a.remote == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		cmd, ok := <-a.remote.Commands()
+		if !ok {
+			return nil
+		}
+		return remoteCmdMsg{cmd: cmd}
+	}
+}
+
+// publishNowPlaying composes the current facade + position state into a
+// core.NowPlaying snapshot and pushes it to the injected MediaRemote (if
+// any), so hardware media-key surfaces and OS lock-screen/notification
+// widgets reflect what's actually playing. Nil-safe no-op when no remote is
+// wired. Called from every point that changes playback state: track start,
+// pause, resume, stop, and auto-advance (see the call sites of TogglePause,
+// facade.Stop, and the PlaybackStartedMsg/PlaybackStoppedMsg cases above).
+func (a *App) publishNowPlaying() {
+	if a.remote == nil {
+		return
+	}
+	state := a.facade.State()
+	np := core.NowPlaying{
+		Playing:  state.Status == core.StatusPlaying,
+		Position: time.Duration(a.currentPos * float64(time.Second)),
+		Duration: time.Duration(a.currentDur * float64(time.Second)),
+	}
+	if state.Current != nil {
+		np.Title = state.Current.Title
+		np.Artist = state.Current.Channel
+	}
+	a.remote.Publish(np)
 }
 
 // --- Helpers ---

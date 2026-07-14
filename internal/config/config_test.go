@@ -73,6 +73,37 @@ func TestAutoUpdateYtDlpDefaultsTrue(t *testing.T) {
 	}
 }
 
+func TestMediaKeysDefaultsTrue(t *testing.T) {
+	setTempHome(t)
+	cfg := Load()
+	if !cfg.MediaKeys {
+		t.Error("MediaKeys should default to true")
+	}
+}
+
+func TestLoadKeepsMediaKeysDefaultForMissingKey(t *testing.T) {
+	tmp := setTempHome(t)
+	dir := filepath.Join(tmp, ".config", "wrkmon-go")
+	os.MkdirAll(dir, 0o755)
+	// A pre-existing config that predates the media_keys key.
+	os.WriteFile(filepath.Join(dir, "config.toml"), []byte("theme = \"github-dark\"\n"), 0o644)
+	cfg := Load()
+	if !cfg.MediaKeys {
+		t.Error("MediaKeys should stay true when key absent")
+	}
+}
+
+func TestMediaKeysHonorsExplicitFalse(t *testing.T) {
+	tmp := setTempHome(t)
+	dir := filepath.Join(tmp, ".config", "wrkmon-go")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "config.toml"), []byte("media_keys = false\n"), 0o644)
+	cfg := Load()
+	if cfg.MediaKeys {
+		t.Error("media_keys = false should be honored")
+	}
+}
+
 func TestEQDefaults(t *testing.T) {
 	setTempHome(t)
 	cfg := Load()

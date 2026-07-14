@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/mediakeys"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/mpv"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/store"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/adapters/ytdlp"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/config"
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui"
 	_ "github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/layouts/single"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/window"
@@ -59,7 +61,19 @@ func main() {
 	facade := tui.NewFacade(searcher, player, storage)
 	defer facade.Close()
 
-	app := tui.NewApp(facade, cfg)
+	// Only construct a real per-OS media-key adapter when the user hasn't
+	// disabled it — avoids opening OS media-session resources (D-Bus, etc)
+	// for a feature that's turned off. When disabled, remote stays the nil
+	// core.MediaRemote; App.Init is nil-safe and starts no listener.
+	var remote core.MediaRemote
+	if cfg.MediaKeys {
+		remote = mediakeys.New("wrkmon-go")
+	}
+	if remote != nil {
+		defer remote.Close()
+	}
+
+	app := tui.NewApp(facade, cfg, remote)
 
 	os.MkdirAll(config.DataDir(), 0o755)
 

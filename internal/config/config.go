@@ -30,6 +30,7 @@ type Config struct {
 	EQPreset         string       `toml:"eq_preset"`
 	EQGains          []float64    `toml:"eq_gains"`
 	EQEnabled        bool         `toml:"eq_enabled"`
+	MediaKeys        bool         `toml:"media_keys"`
 }
 
 // DefaultConfig returns sensible defaults.
@@ -45,6 +46,7 @@ func DefaultConfig() Config {
 		EQPreset:         "flat",
 		EQGains:          nil,
 		EQEnabled:        false,
+		MediaKeys:        true,
 	}
 }
 
