@@ -18,6 +18,14 @@ import (
 var version = "dev"
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-v", "version":
+			fmt.Printf("wrkmon-go %s\n", version)
+			return
+		}
+	}
+
 	if len(os.Args) > 1 && (os.Args[1] == "window" || os.Args[1] == "--window") {
 		cfg := config.Load()
 		if err := window.Launch(cfg.Window.Terminal, cfg.Window.ExtraArgs); err != nil {
