@@ -17,14 +17,21 @@ const mprisTrackID dbus.ObjectPath = "/org/wrkmon/track/1"
 //   - xesam:title    (s)  track title
 //   - xesam:artist   (as) list of artists
 //
+// A blank artist emits an empty list ([]string{}), never [""]: a single blank
+// entry reads as an artist literally named "" in playerctl/desktop widgets.
+//
 // This helper is pure (no D-Bus connection) so it is unit-testable on any
 // platform and has no build constraint.
 func mprisMetadata(np core.NowPlaying) map[string]dbus.Variant {
+	artists := []string{}
+	if np.Artist != "" {
+		artists = []string{np.Artist}
+	}
 	return map[string]dbus.Variant{
 		"mpris:trackid": dbus.MakeVariant(mprisTrackID),
 		"mpris:length":  dbus.MakeVariant(np.Duration.Microseconds()),
 		"xesam:title":   dbus.MakeVariant(np.Title),
-		"xesam:artist":  dbus.MakeVariant([]string{np.Artist}),
+		"xesam:artist":  dbus.MakeVariant(artists),
 	}
 }
 

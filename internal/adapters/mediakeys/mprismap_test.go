@@ -86,3 +86,38 @@ func TestMPRISMetadata(t *testing.T) {
 		t.Fatalf("mpris:trackid = %q, want /org/wrkmon/track/1", tid)
 	}
 }
+
+// TestMPRISMetadataArtist covers Fix 5: xesam:artist must be an empty list for
+// a blank artist, never [""] (which reads as an artist literally named "" in
+// playerctl and desktop widgets).
+func TestMPRISMetadataArtist(t *testing.T) {
+	cases := []struct {
+		name   string
+		artist string
+		want   []string
+	}{
+		{"named artist", "Rick Astley", []string{"Rick Astley"}},
+		{"blank artist", "", []string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := mprisMetadata(core.NowPlaying{Title: "T", Artist: tc.artist})
+			v, ok := m["xesam:artist"]
+			if !ok {
+				t.Fatal("missing xesam:artist")
+			}
+			got, ok := v.Value().([]string)
+			if !ok {
+				t.Fatalf("xesam:artist type = %T, want []string", v.Value())
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("xesam:artist = %#v, want %#v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("xesam:artist = %#v, want %#v", got, tc.want)
+				}
+			}
+		})
+	}
+}
