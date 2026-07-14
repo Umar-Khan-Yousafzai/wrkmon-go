@@ -257,6 +257,30 @@ func TestPublishNowPlayingComposesFromFacadeState(t *testing.T) {
 	}
 }
 
+// TestPositionUpdatePublishesCurrentPosition covers Fix 3: the 1Hz
+// PositionUpdateMsg must republish NowPlaying so the MPRIS Position property
+// tracks playback (playerctl/desktop widgets read it from the last publish).
+// Before the fix, Position was only published on track-start/pause and stayed
+// frozen at 0 for the whole track.
+func TestPositionUpdatePublishesCurrentPosition(t *testing.T) {
+	remote := newFakeRemote()
+	app, _ := newRemoteTestApp(t, remote)
+
+	before := len(remote.published)
+	app.Update(PositionUpdateMsg{Position: 33, Duration: 60})
+
+	if len(remote.published) <= before {
+		t.Fatal("PositionUpdateMsg did not publish a NowPlaying snapshot")
+	}
+	np := remote.lastPublished()
+	if np.Position != 33*time.Second {
+		t.Errorf("published NowPlaying.Position = %v, want 33s (Position must track playback)", np.Position)
+	}
+	if np.Duration != 60*time.Second {
+		t.Errorf("published NowPlaying.Duration = %v, want 60s", np.Duration)
+	}
+}
+
 // TestSlashStopResetsPositionAndPublishesZeroed is the regression test for
 // the inconsistent-stop bug: /stop at 45s of a 180s track used to publish
 // NowPlaying{Playing:false, Position:45s, Duration:180s} — stopped but with

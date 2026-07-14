@@ -467,11 +467,8 @@ func (a *App) buildCommands() *commands.Dispatcher {
 				return a.eqStatusLine(), nil
 			case fields[0] == "off":
 				a.eq.Enabled = false
-				if err := a.facade.SetAudioFilter(""); err != nil {
-					return "", err
-				}
 				a.saveEQ()
-				return "EQ off", nil
+				return "EQ off", a.applyEQ("")
 			case fields[0] == "band" && len(fields) == 3:
 				n, err1 := strconv.Atoi(fields[1])
 				db, err2 := strconv.ParseFloat(fields[2], 64)
@@ -481,22 +478,16 @@ func (a *App) buildCommands() *commands.Dispatcher {
 				if err := a.eq.SetBand(n, db); err != nil {
 					return "", err
 				}
-				if err := a.facade.SetAudioFilter(a.eq.FilterString()); err != nil {
-					return "", err
-				}
 				a.saveEQ()
-				return fmt.Sprintf("EQ band %d → %+.1f dB (custom)", n, db), nil
+				return fmt.Sprintf("EQ band %d → %+.1f dB (custom)", n, db), a.applyEQ(a.eq.FilterString())
 			default:
 				e, ok := core.EQPreset(fields[0])
 				if !ok {
 					return "", fmt.Errorf("unknown preset %q (have: %s, off, band)", fields[0], strings.Join(core.EQPresetNames, ", "))
 				}
 				a.eq = e
-				if err := a.facade.SetAudioFilter(a.eq.FilterString()); err != nil {
-					return "", err
-				}
 				a.saveEQ()
-				return "EQ preset: " + fields[0], nil
+				return "EQ preset: " + fields[0], a.applyEQ(a.eq.FilterString())
 			}
 		},
 	})
@@ -546,15 +537,34 @@ func (a *App) saveEQ() {
 	_ = config.Save(a.cfg)
 }
 
+// applyEQ pushes filter to the player and tolerates the "nothing playing yet"
+// case. Callers mutate and persist a.eq BEFORE calling this, so a failure to
+// apply the filter while no track is playing is not a user error: the Facade
+// caches the filter chain (see facade.audioFilter) and reapplies it on the
+// next track, so a pre-playback `/eq bass` still takes effect and survives a
+// restart. A real apply error is surfaced only while a track is actually
+// playing (facade.IsPlaying()), where a failed SetAudioFilter means the live
+// filter chain genuinely didn't update.
+func (a *App) applyEQ(filter string) error {
+	if err := a.facade.SetAudioFilter(filter); err != nil && a.facade.IsPlaying() {
+		return err
+	}
+	return nil
+}
+
 // Init implements tea.Model.
 func (a *App) Init() tea.Cmd {
 	// Apply saved volume
 	if a.cfg.Volume > 0 {
 		_ = a.facade.SetVolume(a.cfg.Volume)
 	}
-	// Apply saved EQ
-	if a.cfg.EQEnabled {
-		a.eq = a.cfg.EQState()
+	// Load saved EQ unconditionally so a stored custom curve survives an
+	// `/eq off` + restart: EQState() carries Enabled=false but keeps the
+	// persisted gains, so a later `/eq band` builds on the retained gains
+	// instead of a flat baseline. Only push the filter to the player when EQ
+	// is actually enabled (FilterString() is "" while disabled anyway).
+	a.eq = a.cfg.EQState()
+	if a.eq.Enabled {
 		_ = a.facade.SetAudioFilter(a.eq.FilterString())
 	}
 	cmds := []tea.Cmd{textinput.Blink}
@@ -874,6 +884,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Duration > 0 {
 			a.currentDur = msg.Duration
 		}
+		// Republish so the MPRIS Position property tracks playback second by
+		// second: playerctl and desktop widgets read Position from the last
+		// publish, so without this it stays frozen at the track-start/pause
+		// value for the whole track (and is wrong after a /seek). The Position
+		// prop is EmitFalse (no bus signal) and the adapter suppresses
+		// Status/Metadata emits when neither changed, so this adds no signal
+		// spam.
+		a.publishNowPlaying()
 		if a.facade.State().Status == core.StatusPlaying || a.facade.State().Current != nil {
 			cmds = append(cmds, a.tickPosition())
 		}

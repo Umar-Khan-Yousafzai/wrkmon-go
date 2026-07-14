@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,23 @@ func (p *eqPlayer) last() string {
 		return ""
 	}
 	return p.filters[len(p.filters)-1]
+}
+
+// erroringEQPlayer is an eqPlayer whose SetAudioFilter fails, with a
+// configurable IsRunning, so /eq tests can distinguish "apply failed while
+// nothing is playing" (tolerated) from "apply failed while playing"
+// (surfaced). It embeds eqPlayer so it still records the filter it was asked
+// to apply.
+type erroringEQPlayer struct {
+	eqPlayer
+	running   bool
+	filterErr error
+}
+
+func (p *erroringEQPlayer) IsRunning() bool { return p.running }
+func (p *erroringEQPlayer) SetAudioFilter(f string) error {
+	p.filters = append(p.filters, f)
+	return p.filterErr
 }
 
 // newEQTestApp builds an App wired to a fake player via a real Facade, with
@@ -181,5 +199,103 @@ func TestEQFilterReappliedOnTrackStart(t *testing.T) {
 
 	if player.last() != wantFilter {
 		t.Errorf("filter recorded after PlayTrack = %q, want %q (reapplied)", player.last(), wantFilter)
+	}
+}
+
+// TestEQNotPlayingApplyErrorStillSaves covers Fix 2 case (a): running an /eq
+// command before playback, where the player isn't up so SetAudioFilter fails,
+// must NOT surface an error and must still persist the EQ state (it will apply
+// on the next track via the Facade's cached filter).
+func TestEQNotPlayingApplyErrorStillSaves(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	player := &erroringEQPlayer{running: false, filterErr: fmt.Errorf("mpv not connected")}
+	f := NewFacade(mouseSearcher{}, player, mouseStore{})
+	app := NewApp(f, config.DefaultConfig())
+
+	out, _, err := app.dispatch.Execute("/eq bass")
+	if err != nil {
+		t.Fatalf("/eq bass while not playing must not surface apply error, got: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(out), "bass") {
+		t.Errorf("feedback = %q, want it to mention bass", out)
+	}
+	// The player was still asked to apply the filter (which it rejected)...
+	if player.last() == "" {
+		t.Error("expected SetAudioFilter to still be attempted")
+	}
+	// ...and the state was persisted despite that failure.
+	got := config.Load()
+	if got.EQPreset != "bass" || !got.EQEnabled {
+		t.Errorf("saved config = {preset:%q enabled:%v}, want {bass true}", got.EQPreset, got.EQEnabled)
+	}
+}
+
+// TestEQPlayingApplyErrorSurfacesButStillSaves covers Fix 2 case (b): while a
+// track is actually playing, a failed SetAudioFilter is a real error and must
+// surface — but the EQ state is still saved first (persist-before-apply).
+func TestEQPlayingApplyErrorSurfacesButStillSaves(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	player := &erroringEQPlayer{running: true, filterErr: fmt.Errorf("mpv af failed")}
+	f := NewFacade(mouseSearcher{}, player, mouseStore{})
+	app := NewApp(f, config.DefaultConfig())
+
+	_, _, err := app.dispatch.Execute("/eq bass")
+	if err == nil {
+		t.Fatal("expected the apply error to surface while a track is playing")
+	}
+	// State must have been persisted before the apply was attempted.
+	got := config.Load()
+	if got.EQPreset != "bass" || !got.EQEnabled {
+		t.Errorf("saved config = {preset:%q enabled:%v}, want {bass true} (must save before applying)", got.EQPreset, got.EQEnabled)
+	}
+}
+
+// TestEQInitLoadsStoredGainsWhenDisabled covers Fix 4: a config carrying custom
+// gains with eq_enabled=false must load those gains at Init (without applying a
+// filter), so a later `/eq band` builds on the retained curve, not a flat one.
+func TestEQInitLoadsStoredGainsWhenDisabled(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+
+	player := &eqPlayer{}
+	f := NewFacade(mouseSearcher{}, player, mouseStore{})
+
+	cfg := config.DefaultConfig()
+	cfg.AutoUpdateYtDlp = false
+	cfg.MediaKeys = false
+	cfg.Volume = 0
+	cfg.EQPreset = "custom"
+	gains := make([]float64, 18)
+	gains[2] = 5.0 // band 3 = +5 dB, retained but currently disabled
+	cfg.EQGains = gains
+	cfg.EQEnabled = false
+
+	app := NewApp(f, cfg)
+	app.Init()
+
+	// Disabled EQ must not push a filter to the player at startup.
+	if player.last() != "" {
+		t.Errorf("filter applied at Init while EQ disabled = %q, want none", player.last())
+	}
+
+	if _, _, err := app.dispatch.Execute("/eq band 1 2"); err != nil {
+		t.Fatalf("/eq band 1 2: %v", err)
+	}
+
+	filter := app.eq.FilterString()
+	// band 3 = +5 dB → 10^(5/20) ≈ 1.7783 → "3b=1.8" (the RETAINED gain).
+	if !strings.Contains(filter, "3b=1.8") {
+		t.Errorf("filter %q lost the stored band-3 gain (want 3b=1.8)", filter)
+	}
+	// band 1 = +2 dB → 10^(2/20) ≈ 1.2589 → "1b=1.3" (the NEW gain).
+	if !strings.Contains(filter, "1b=1.3") {
+		t.Errorf("filter %q missing the new band-1 gain (want 1b=1.3)", filter)
 	}
 }
