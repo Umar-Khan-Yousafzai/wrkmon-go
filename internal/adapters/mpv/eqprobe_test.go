@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Umar-Khan-Yousafzai/wrkmon-go/core"
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
 )
 
 // TestSetAudioFilter_Integration is a live probe against a real mpv binary:
