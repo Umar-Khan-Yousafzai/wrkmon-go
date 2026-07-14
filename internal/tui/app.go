@@ -148,6 +148,7 @@ type App struct {
 	focusKind   focus.Kind
 	focusTick   int
 	focusSeed   int64
+	focusGen    int
 }
 
 // NewApp creates the root TUI application.
@@ -486,6 +487,7 @@ func (a *App) buildCommands() *commands.Dispatcher {
 			a.focusSeed = time.Now().UnixNano()
 			a.focusKind = focus.RandomKind(rand.New(rand.NewSource(a.focusSeed)))
 			a.focusTick = 0
+			a.focusGen++ // invalidates any in-flight tick from a previous session
 			a.focusActive = true
 			return "FOCUS_ON", nil
 		},
@@ -726,12 +728,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.statusBar.SetWidth(msg.Width)
 
 	case focusTickMsg:
-		// A stray tick can arrive after the overlay was already dismissed
-		// (the previous tick's timer was already in flight); ignore it and,
-		// crucially, don't reschedule another one.
-		if a.focusActive {
+		// Only a tick from the CURRENT session (matching generation) may
+		// advance the animation and reschedule. A stale tick — left in
+		// flight by a session that was dismissed, possibly after a new
+		// /focus already started — is dropped outright: focusActive alone
+		// isn't enough, because if it merely checked the boolean, a stale
+		// tick arriving during a new session would increment AND
+		// reschedule, forking a second self-perpetuating 2s chain.
+		if a.focusActive && msg.gen == a.focusGen {
 			a.focusTick++
-			return a, focusTick()
+			return a, focusTick(a.focusGen)
 		}
 		return a, nil
 
@@ -1351,7 +1357,7 @@ func (a *App) handleSubmit(input string) tea.Cmd {
 		case result == "LOAD_DOWNLOADS":
 			return a.doLoadDownloads()
 		case result == "FOCUS_ON":
-			return focusTick()
+			return focusTick(a.focusGen)
 		case strings.HasPrefix(result, "DOWNLOAD:"):
 			parts := strings.SplitN(strings.TrimPrefix(result, "DOWNLOAD:"), "|", 3)
 			if len(parts) == 3 {
@@ -1848,13 +1854,18 @@ func (a *App) doLoadHistory() tea.Cmd {
 }
 
 // focusTickMsg drives the /focus overlay's fake animation forward, once per
-// focusTick() interval, for as long as a.focusActive stays true.
-type focusTickMsg struct{}
+// focusTick() interval, for as long as a.focusActive stays true. gen is the
+// a.focusGen value of the /focus session that scheduled it, so the Update
+// handler can drop ticks left in flight by an earlier, dismissed session.
+type focusTickMsg struct {
+	gen int
+}
 
-// focusTick schedules the next /focus overlay animation frame.
-func focusTick() tea.Cmd {
+// focusTick schedules the next /focus overlay animation frame, stamped with
+// the scheduling session's generation.
+func focusTick(gen int) tea.Cmd {
 	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-		return focusTickMsg{}
+		return focusTickMsg{gen: gen}
 	})
 }
 

@@ -134,7 +134,7 @@ func TestFocusTickIncrementsAndReschedulesWhileActive(t *testing.T) {
 	app := newFocusTestApp(t)
 	activateFocus(t, app)
 
-	_, cmd := app.Update(focusTickMsg{})
+	_, cmd := app.Update(focusTickMsg{gen: app.focusGen})
 
 	if app.focusTick != 1 {
 		t.Errorf("focusTick = %d, want 1", app.focusTick)
@@ -149,12 +149,58 @@ func TestFocusTickNoopWhileInactive(t *testing.T) {
 	// Note: focus is never activated in this test.
 
 	before := app.focusTick
-	_, cmd := app.Update(focusTickMsg{})
+	_, cmd := app.Update(focusTickMsg{gen: app.focusGen})
 
 	if app.focusTick != before {
 		t.Errorf("focusTick changed from %d to %d on a stray tick while inactive", before, app.focusTick)
 	}
 	if cmd != nil {
 		t.Errorf("expected no cmd from a stray focusTickMsg while inactive, got %v", cmd)
+	}
+}
+
+// TestFocusStaleTickFromPreviousSessionDropped reproduces the reviewer's
+// tick-chain duplication timeline: /focus (chain A scheduled) → dismiss
+// before A's tick fires → /focus again (chain B scheduled) → chain A's
+// stale tick finally arrives. With only a focusActive boolean check, the
+// stale tick sees focusActive==true, increments, AND reschedules — leaving
+// two self-perpetuating 2s chains advancing focusTick at double speed.
+// The generation guard must drop it: no increment, no reschedule.
+func TestFocusStaleTickFromPreviousSessionDropped(t *testing.T) {
+	app := newFocusTestApp(t)
+
+	// Session A: activate, capture its generation.
+	activateFocus(t, app)
+	staleGen := app.focusGen
+
+	// Dismiss before session A's in-flight tick arrives.
+	app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if app.focusActive {
+		t.Fatal("setup: expected dismissal to deactivate focus")
+	}
+
+	// Session B: reactivate; its own tick chain is now scheduled.
+	activateFocus(t, app)
+	if app.focusGen == staleGen {
+		t.Fatal("setup: expected reactivation to bump focusGen")
+	}
+
+	// Session A's stale tick arrives late.
+	_, cmd := app.Update(focusTickMsg{gen: staleGen})
+
+	if app.focusTick != 0 {
+		t.Errorf("focusTick = %d after a stale-gen tick, want 0 (dropped, not double-advanced)", app.focusTick)
+	}
+	if cmd != nil {
+		t.Errorf("stale-gen tick must not reschedule (would fork a second 2s chain), got cmd %v", cmd)
+	}
+
+	// A current-gen tick still drives session B's animation normally.
+	_, cmd = app.Update(focusTickMsg{gen: app.focusGen})
+	if app.focusTick != 1 {
+		t.Errorf("focusTick = %d after a current-gen tick, want 1", app.focusTick)
+	}
+	if cmd == nil {
+		t.Error("expected the current-gen tick to reschedule the next frame")
 	}
 }
