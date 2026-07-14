@@ -157,6 +157,11 @@ type App struct {
 	focusGen    int
 }
 
+// AppVersion is shown on the welcome screen. main() overwrites it with the
+// ldflags-stamped build version (e.g. "v2.0.0-alpha.4"); the default only
+// appears in untagged dev builds and tests.
+var AppVersion = "dev"
+
 // NewApp creates the root TUI application. remote is optional and variadic
 // so every existing NewApp(facade, cfg) call site keeps compiling unchanged:
 // pass a core.MediaRemote to wire hardware media-key commands, or omit it
@@ -1090,7 +1095,7 @@ func (a *App) renderSearchView(height int) string {
 				" \\ \\ /\\ / /| '__|| |/ /| '_ \\ / _ \\| '_ \\   \n" +
 				"  \\ V  V / | |   |   < | | | | (_) | | | |  \n" +
 				"   \\_/\\_/  |_|   |_|\\_\\|_| |_|\\___/|_| |_|  \n")
-		version := a.styles.Muted.Render("                   v2.0 — Go Edition")
+		version := a.styles.Muted.Render("                   " + AppVersion + " — Go Edition")
 		hint1 := a.styles.Muted.Render("  Type to search YouTube")
 		hint2 := a.styles.Muted.Render("  /help for commands  •  Tab to switch views")
 		hint3 := a.styles.Muted.Render("  Enter to play  •  a to add to queue")

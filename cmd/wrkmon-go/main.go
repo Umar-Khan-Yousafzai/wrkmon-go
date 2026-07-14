@@ -73,6 +73,7 @@ func main() {
 		defer remote.Close()
 	}
 
+	tui.AppVersion = version
 	app := tui.NewApp(facade, cfg, remote)
 
 	os.MkdirAll(config.DataDir(), 0o755)
