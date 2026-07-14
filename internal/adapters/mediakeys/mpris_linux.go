@@ -4,6 +4,7 @@ package mediakeys
 
 import (
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
@@ -249,10 +250,38 @@ func (r *mprisRemote) Publish(np core.NowPlaying) {
 		return
 	}
 	if changed {
-		props.SetMust(mprisPlayerIface, "PlaybackStatus", status)
-		props.SetMust(mprisPlayerIface, "Metadata", mprisMetadata(np))
+		setProp(props, mprisPlayerIface, "PlaybackStatus", status)
+		setProp(props, mprisPlayerIface, "Metadata", mprisMetadata(np))
 	}
-	props.SetMust(mprisPlayerIface, "Position", np.Position.Microseconds())
+	setProp(props, mprisPlayerIface, "Position", np.Position.Microseconds())
+}
+
+// setProp updates an MPRIS property without ever panicking the caller.
+//
+// godbus v5.2.2's prop.Properties.SetMust panics if the PropertiesChanged
+// emit fails — which happens whenever the session bus goes away underneath a
+// live adapter (a dbus-daemon restart, or the bus being torn down and rebuilt
+// across a suspend/resume). Before this guard, the next Publish would panic on
+// the TUI's goroutine and kill the whole app. We recover the panic, log it to
+// stderr, and carry on; the next Publish simply retries.
+//
+// SetMust releases its internal mutex before the panic unwinds (its Unlock is
+// deferred precisely "in case of panic"), so recovering here leaves
+// prop.Properties in a consistent, usable state.
+//
+// NOTE: we deliberately do NOT route through prop.Properties.Set (the
+// org.freedesktop.DBus.Properties.Set handler). All of our MPRIS properties
+// are intentionally read-only (no Writable flag), and Set rejects every one of
+// them with ErrReadOnly *before* it would update the value or emit — so it can
+// never actually publish now-playing state. Recover around SetMust preserves
+// the real write+emit behaviour while removing the crash.
+func setProp(props *prop.Properties, iface, property string, v any) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			fmt.Fprintf(os.Stderr, "wrkmon: mpris publish %s failed: %v\n", property, rec)
+		}
+	}()
+	props.SetMust(iface, property, v)
 }
 
 // Close releases the bus name and connection. It is idempotent: the guard

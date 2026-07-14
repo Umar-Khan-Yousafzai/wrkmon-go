@@ -151,3 +151,39 @@ func TestMPRISCloseIdempotentNoConn(t *testing.T) {
 	// A publish after close must be a no-op and must not panic.
 	r.Publish(core.NowPlaying{Title: "x", Playing: true})
 }
+
+// TestMPRISPublishAfterBusDropDoesNotPanic covers Fix 1: godbus SetMust panics
+// when the PropertiesChanged emit fails, which happens when the session bus
+// dies underneath a live adapter (dbus restart, suspend/resume). We simulate
+// that by closing the underlying connection WITHOUT going through Close (which
+// would set the closed guard and make Publish an early-return no-op), forcing
+// Publish through the property-set path with a dead connection — the exact
+// path that used to crash the TUI goroutine. It must now log and continue.
+//
+// Guarded: needs a live session bus, skipped under -short.
+func TestMPRISPublishAfterBusDropDoesNotPanic(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real-bus MPRIS test in -short mode")
+	}
+	if os.Getenv("DBUS_SESSION_BUS_ADDRESS") == "" {
+		t.Skip("no DBUS_SESSION_BUS_ADDRESS; skipping real-bus MPRIS test")
+	}
+
+	remote, err := newMPRIS("wrkmon-go")
+	if err != nil {
+		t.Fatalf("newMPRIS: %v", err)
+	}
+	r := remote.(*mprisRemote)
+	t.Cleanup(func() { _ = r.Close() })
+
+	// Establish a "last" state so the next publish is a changed one that must
+	// emit PlaybackStatus/Metadata (the signals that fail on a dead bus).
+	r.Publish(core.NowPlaying{Title: "Before Drop", Playing: false})
+
+	// Kill the connection out from under the adapter (closed guard stays false).
+	_ = r.conn.Close()
+
+	// These both drive a changed publish through the emit path; neither may panic.
+	r.Publish(core.NowPlaying{Title: "After Drop", Playing: true, Position: 1 * time.Second})
+	r.Publish(core.NowPlaying{Title: "After Drop 2", Playing: false, Position: 3 * time.Second})
+}

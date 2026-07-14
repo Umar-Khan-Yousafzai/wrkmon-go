@@ -133,9 +133,11 @@ func joinLines(lines []string) string {
 
 // seededRand derives a fresh, deterministic *rand.Rand from r's current
 // state mixed with an extra integer (typically tick). This is how
-// KindHtop gets different-but-deterministic numbers per tick: we don't want
-// to mutate the caller's r for the "which tick" decision, we want a rand
-// stream that depends on (initial seed, tick) only.
+// KindHtop gets different-but-deterministic numbers per tick. Reading
+// r.Int63() advances the caller's r — that's fine here: callers pass a
+// freshly-seeded r per Render, and each derived stream depends only on
+// (the drawn base, mix), so output stays deterministic for a given
+// (seed, call order).
 func seededRand(r *rand.Rand, mix int) *rand.Rand {
 	base := uint64(r.Int63())
 	blend := uint64(mix)*2654435761 + 0x9E3779B97F4A7C15
