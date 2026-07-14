@@ -70,12 +70,14 @@ func (m *MPV) Play(url string) error {
 	if bin == "" {
 		bin = "mpv"
 	}
-	cmd := exec.Command(bin,
+	args := []string{
 		"--no-video",
 		"--no-terminal",
 		fmt.Sprintf("--input-ipc-server=%s", sockPath),
-		url,
-	)
+	}
+	args = append(args, extraMPVArgs()...)
+	args = append(args, url)
+	cmd := exec.Command(bin, args...)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start mpv: %w", err)
 	}
