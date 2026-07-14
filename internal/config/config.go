@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
 )
 
 // WindowConfig controls the `wrkmon-go window` launcher.
@@ -25,6 +27,9 @@ type Config struct {
 	MaxSearchResults int          `toml:"max_search_results"`
 	Window           WindowConfig `toml:"window"`
 	AutoUpdateYtDlp  bool         `toml:"auto_update_ytdlp"`
+	EQPreset         string       `toml:"eq_preset"`
+	EQGains          []float64    `toml:"eq_gains"`
+	EQEnabled        bool         `toml:"eq_enabled"`
 }
 
 // DefaultConfig returns sensible defaults.
@@ -37,7 +42,23 @@ func DefaultConfig() Config {
 		MaxSearchResults: 100,
 		Window:           WindowConfig{Terminal: "auto"},
 		AutoUpdateYtDlp:  true,
+		EQPreset:         "flat",
+		EQGains:          nil,
+		EQEnabled:        false,
 	}
+}
+
+// EQState reconstructs a core.EQState from the persisted config fields.
+// Persisted gains that don't have exactly 18 entries (e.g. a hand-edited or
+// corrupted config file) are treated as flat rather than trusted verbatim.
+func (c Config) EQState() core.EQState {
+	e := core.EQState{Preset: c.EQPreset, Enabled: c.EQEnabled}
+	if len(c.EQGains) != 18 {
+		e.Preset = "flat"
+		return e
+	}
+	copy(e.Gains[:], c.EQGains)
+	return e
 }
 
 // configDir returns ~/.config/wrkmon-go/

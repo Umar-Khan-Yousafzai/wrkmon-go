@@ -20,6 +20,13 @@ type Facade struct {
 	lyrics   *lyrics.Fetcher
 	queue    *core.Queue
 	state    core.PlayerState
+
+	// audioFilter is the last filter chain set via SetAudioFilter. mpv
+	// starts each new process (see PlayTrack, Respawn) with an empty
+	// filter chain, so it's remembered here and reapplied after every
+	// (re)spawn — otherwise the equalizer would silently drop on every
+	// track change.
+	audioFilter string
 }
 
 // NewFacade creates the facade with injected adapters.
@@ -75,6 +82,12 @@ func (f *Facade) PlayTrack(ctx context.Context, track core.Track) error {
 
 	if err := f.player.Play(url); err != nil {
 		return fmt.Errorf("play: %w", err)
+	}
+
+	// mpv spawns a fresh process per Play(); reapply any active filter
+	// chain (equalizer) since the new process starts with a clean one.
+	if f.audioFilter != "" {
+		_ = f.player.SetAudioFilter(f.audioFilter)
 	}
 
 	track.StreamURL = url
@@ -194,8 +207,10 @@ func (f *Facade) SetVolume(vol int) error {
 }
 
 // SetAudioFilter sets (or clears, with "") the player's audio filter chain
-// (used for the equalizer).
+// (used for the equalizer). The value is remembered so PlayTrack and
+// Respawn can reapply it after mpv restarts (see the audioFilter field).
 func (f *Facade) SetAudioFilter(filter string) error {
+	f.audioFilter = filter
 	return f.player.SetAudioFilter(filter)
 }
 
@@ -228,6 +243,9 @@ func (f *Facade) IsPlaying() bool {
 func (f *Facade) Respawn() error {
 	if err := f.player.Respawn(); err != nil {
 		return err
+	}
+	if f.audioFilter != "" {
+		_ = f.player.SetAudioFilter(f.audioFilter)
 	}
 	f.state.Status = core.StatusPlaying
 	return nil

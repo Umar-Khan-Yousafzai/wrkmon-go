@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -133,6 +134,9 @@ type App struct {
 	npBarRow   int
 	npBarStart int
 	npBarWidth int
+
+	// Equalizer state (persisted; see /eq command, saveEQ, eqStatusLine)
+	eq core.EQState
 }
 
 // NewApp creates the root TUI application.
@@ -420,8 +424,52 @@ func (a *App) buildCommands() *commands.Dispatcher {
 		},
 	})
 
+	d.Register(commands.Command{
+		Name:        "/eq",
+		Description: "Equalizer: /eq <preset>|off|show|band <1-18> <dB>",
+		Handler: func(args string) (string, error) {
+			fields := strings.Fields(args)
+			switch {
+			case len(fields) == 0 || fields[0] == "show":
+				return a.eqStatusLine(), nil
+			case fields[0] == "off":
+				a.eq.Enabled = false
+				if err := a.facade.SetAudioFilter(""); err != nil {
+					return "", err
+				}
+				a.saveEQ()
+				return "EQ off", nil
+			case fields[0] == "band" && len(fields) == 3:
+				n, err1 := strconv.Atoi(fields[1])
+				db, err2 := strconv.ParseFloat(fields[2], 64)
+				if err1 != nil || err2 != nil {
+					return "", fmt.Errorf("usage: /eq band <1-18> <-12..12>")
+				}
+				if err := a.eq.SetBand(n, db); err != nil {
+					return "", err
+				}
+				if err := a.facade.SetAudioFilter(a.eq.FilterString()); err != nil {
+					return "", err
+				}
+				a.saveEQ()
+				return fmt.Sprintf("EQ band %d → %+.1f dB (custom)", n, db), nil
+			default:
+				e, ok := core.EQPreset(fields[0])
+				if !ok {
+					return "", fmt.Errorf("unknown preset %q (have: %s, off, band)", fields[0], strings.Join(core.EQPresetNames, ", "))
+				}
+				a.eq = e
+				if err := a.facade.SetAudioFilter(a.eq.FilterString()); err != nil {
+					return "", err
+				}
+				a.saveEQ()
+				return "EQ preset: " + fields[0], nil
+			}
+		},
+	})
+
 	// Reserve v2.x namespaces (hidden)
-	for _, ns := range []string{"/eq", "/focus"} {
+	for _, ns := range []string{"/focus"} {
 		name := ns
 		d.Register(commands.Command{
 			Name:        name,
@@ -436,11 +484,45 @@ func (a *App) buildCommands() *commands.Dispatcher {
 	return d
 }
 
+// eqStatusLine renders the current EQ state for /eq and /eq show: the
+// active preset plus a comma-separated list of non-zero bands (e.g.
+// "3:+4.5dB"), or "EQ off" when disabled.
+func (a *App) eqStatusLine() string {
+	if !a.eq.Enabled {
+		return "EQ off"
+	}
+	var bands []string
+	for i, db := range a.eq.Gains {
+		if db != 0 {
+			bands = append(bands, fmt.Sprintf("%d:%+.1fdB", i+1, db))
+		}
+	}
+	if len(bands) == 0 {
+		return fmt.Sprintf("EQ preset: %s (flat)", a.eq.Preset)
+	}
+	return fmt.Sprintf("EQ preset: %s (%s)", a.eq.Preset, strings.Join(bands, ", "))
+}
+
+// saveEQ persists the current EQ state into config, mirroring how /vol and
+// /theme persist their settings.
+func (a *App) saveEQ() {
+	gains := a.eq.Gains // array value copy, independent of a.eq
+	a.cfg.EQPreset = a.eq.Preset
+	a.cfg.EQGains = gains[:]
+	a.cfg.EQEnabled = a.eq.Enabled
+	_ = config.Save(a.cfg)
+}
+
 // Init implements tea.Model.
 func (a *App) Init() tea.Cmd {
 	// Apply saved volume
 	if a.cfg.Volume > 0 {
 		_ = a.facade.SetVolume(a.cfg.Volume)
+	}
+	// Apply saved EQ
+	if a.cfg.EQEnabled {
+		a.eq = a.cfg.EQState()
+		_ = a.facade.SetAudioFilter(a.eq.FilterString())
 	}
 	cmds := []tea.Cmd{textinput.Blink}
 	if a.cfg.AutoUpdateYtDlp {
