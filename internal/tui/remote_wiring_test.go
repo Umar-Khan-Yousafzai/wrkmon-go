@@ -9,6 +9,7 @@ import (
 
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/config"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/components"
 )
 
 // remotePlayer is a minimal ports.Player stub that records Play/Pause/
@@ -253,6 +254,58 @@ func TestPublishNowPlayingComposesFromFacadeState(t *testing.T) {
 	}
 	if np.Duration != 60*time.Second {
 		t.Errorf("NowPlaying.Duration = %v, want 60s", np.Duration)
+	}
+}
+
+// TestSlashStopResetsPositionAndPublishesZeroed is the regression test for
+// the inconsistent-stop bug: /stop at 45s of a 180s track used to publish
+// NowPlaying{Playing:false, Position:45s, Duration:180s} — stopped but with
+// a stale timestamp (which also fed the status bar) — while RemoteStop and
+// the auto-advance-exhausted path correctly reported 0/0. All three sites
+// now share doStopPlayback, so /stop must publish a fully zeroed snapshot.
+func TestSlashStopResetsPositionAndPublishesZeroed(t *testing.T) {
+	remote := newFakeRemote()
+	app, player := newRemoteTestApp(t, remote)
+	app.currentPos = 45
+	app.currentDur = 180
+
+	app.Update(components.PromptSubmitMsg{Value: "/stop"})
+
+	if player.last() != "stop" {
+		t.Fatalf("player recorded %q, want stop", player.last())
+	}
+	np := remote.lastPublished()
+	if np.Playing {
+		t.Error("published NowPlaying.Playing = true, want false after /stop")
+	}
+	if np.Position != 0 {
+		t.Errorf("published NowPlaying.Position = %v, want 0 (stale 45s must be reset)", np.Position)
+	}
+	if np.Duration != 0 {
+		t.Errorf("published NowPlaying.Duration = %v, want 0 (stale 180s must be reset)", np.Duration)
+	}
+	if np.Title != "" {
+		t.Errorf("published NowPlaying.Title = %q, want empty after stop", np.Title)
+	}
+	if app.currentPos != 0 || app.currentDur != 0 {
+		t.Errorf("app.currentPos/currentDur = %v/%v, want 0/0 (stale values also feed the status bar)",
+			app.currentPos, app.currentDur)
+	}
+}
+
+// TestRemoteStopPublishesZeroedSnapshot pins the already-correct RemoteStop
+// behavior so the shared-helper refactor can't regress it.
+func TestRemoteStopPublishesZeroedSnapshot(t *testing.T) {
+	remote := newFakeRemote()
+	app, _ := newRemoteTestApp(t, remote)
+	app.currentPos = 45
+	app.currentDur = 180
+
+	app.Update(remoteCmdMsg{cmd: core.RemoteStop})
+
+	np := remote.lastPublished()
+	if np.Playing || np.Position != 0 || np.Duration != 0 {
+		t.Errorf("published NowPlaying = %+v, want zeroed stopped snapshot", np)
 	}
 }
 

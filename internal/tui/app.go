@@ -255,10 +255,9 @@ func (a *App) buildCommands() *commands.Dispatcher {
 		Name:        "/stop",
 		Description: "Stop playback",
 		Handler: func(args string) (string, error) {
-			if err := a.facade.Stop(); err != nil {
+			if err := a.doStopPlayback(); err != nil {
 				return "", err
 			}
-			a.publishNowPlaying()
 			return "", nil
 		},
 	})
@@ -768,12 +767,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case core.RemotePrev:
 			cmds = append(cmds, a.doPrevTrack())
 		case core.RemoteStop:
-			if err := a.facade.Stop(); err != nil {
+			if err := a.doStopPlayback(); err != nil {
 				cmds = append(cmds, a.toast.Show(err.Error(), true))
 			}
-			a.currentPos = 0
-			a.currentDur = 0
-			a.publishNowPlaying()
 		}
 		// Re-arm: keep exactly one listen in flight.
 		if cmd := a.remoteListenCmd(); cmd != nil {
@@ -890,12 +886,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, a.doPlayFromQueue())
 			} else {
 				// No more tracks — stop
-				a.facade.Stop()
+				_ = a.doStopPlayback()
 				a.statusBar.SetState(a.facade.State())
-				a.currentPos = 0
-				a.currentDur = 0
 				cmds = append(cmds, a.toast.Show("Queue finished", false))
-				a.publishNowPlaying()
 			}
 		}
 
@@ -1974,6 +1967,24 @@ func (a *App) listenRemote() tea.Cmd {
 		}
 		return remoteCmdMsg{cmd: cmd}
 	}
+}
+
+// doStopPlayback is the single shared stop path: it stops playback via the
+// facade, resets the tracked position/duration (which feed both the status
+// bar and the published NowPlaying snapshot), and publishes the stopped
+// state to the media remote. Used by the /stop command, the RemoteStop
+// media-key command, and the auto-advance queue-exhausted path so all three
+// report identical state — never a "stopped" snapshot carrying a stale
+// timestamp. On facade error nothing is reset or published (the stop didn't
+// take effect) and the error is returned for the caller to surface.
+func (a *App) doStopPlayback() error {
+	if err := a.facade.Stop(); err != nil {
+		return err
+	}
+	a.currentPos = 0
+	a.currentDur = 0
+	a.publishNowPlaying()
+	return nil
 }
 
 // publishNowPlaying composes the current facade + position state into a
