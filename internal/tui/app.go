@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/core"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/commands"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/components"
+	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/focus"
 	"github.com/Umar-Khan-Yousafzai/wrkmon-go/internal/tui/theme"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -137,6 +139,15 @@ type App struct {
 
 	// Equalizer state (persisted; see /eq command, saveEQ, eqStatusLine)
 	eq core.EQState
+
+	// Focus overlay state: /focus swaps the whole screen for a fake
+	// "work" render (see internal/tui/focus) until any key is pressed.
+	// While focusActive, View() renders ONLY the overlay and Update
+	// intercepts all keys/mouse before the normal handling below.
+	focusActive bool
+	focusKind   focus.Kind
+	focusTick   int
+	focusSeed   int64
 }
 
 // NewApp creates the root TUI application.
@@ -468,18 +479,17 @@ func (a *App) buildCommands() *commands.Dispatcher {
 		},
 	})
 
-	// Reserve v2.x namespaces (hidden)
-	for _, ns := range []string{"/focus"} {
-		name := ns
-		d.Register(commands.Command{
-			Name:        name,
-			Description: "Coming in v2.x",
-			Hidden:      true,
-			Handler: func(args string) (string, error) {
-				return fmt.Sprintf("%s is coming in a future release", name), nil
-			},
-		})
-	}
+	d.Register(commands.Command{
+		Name:        "/focus",
+		Description: "Show a fake work screen; any key returns",
+		Handler: func(args string) (string, error) {
+			a.focusSeed = time.Now().UnixNano()
+			a.focusKind = focus.RandomKind(rand.New(rand.NewSource(a.focusSeed)))
+			a.focusTick = 0
+			a.focusActive = true
+			return "FOCUS_ON", nil
+		},
+	})
 
 	return d
 }
@@ -537,12 +547,29 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
+		// The /focus overlay hijacks the whole screen; swallow mouse
+		// events entirely while it's up rather than let them seek/click
+		// through to the (invisible) player UI underneath.
+		if a.focusActive {
+			return a, nil
+		}
 		if cmd := a.handleMouse(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 		return a, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
+		// The /focus overlay eats every key except ctrl+c (which still
+		// quits the whole app, same as normal): any other key dismisses
+		// the overlay and nothing else, before any of the usual key
+		// handling below runs.
+		if a.focusActive {
+			if msg.String() == "ctrl+c" {
+				return a, tea.Quit
+			}
+			a.focusActive = false
+			return a, nil
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			return a, tea.Quit
@@ -697,6 +724,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.statusBar.SetWidth(msg.Width)
+
+	case focusTickMsg:
+		// A stray tick can arrive after the overlay was already dismissed
+		// (the previous tick's timer was already in flight); ignore it and,
+		// crucially, don't reschedule another one.
+		if a.focusActive {
+			a.focusTick++
+			return a, focusTick()
+		}
+		return a, nil
 
 	case components.PromptSubmitMsg:
 		cmd := a.handleSubmit(msg.Value)
@@ -889,6 +926,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model.
 func (a *App) View() string {
+	if a.focusActive {
+		return focus.Render(a.focusKind, a.width, a.height, rand.New(rand.NewSource(a.focusSeed)), a.focusTick)
+	}
+
 	if a.width == 0 {
 		return ""
 	}
@@ -1309,6 +1350,8 @@ func (a *App) handleSubmit(input string) tea.Cmd {
 			return a.doFetchLyrics()
 		case result == "LOAD_DOWNLOADS":
 			return a.doLoadDownloads()
+		case result == "FOCUS_ON":
+			return focusTick()
 		case strings.HasPrefix(result, "DOWNLOAD:"):
 			parts := strings.SplitN(strings.TrimPrefix(result, "DOWNLOAD:"), "|", 3)
 			if len(parts) == 3 {
@@ -1802,6 +1845,17 @@ func (a *App) doLoadHistory() tea.Cmd {
 		entries, err := a.facade.LoadHistory(context.Background(), 50, 0)
 		return HistoryLoadedMsg{Entries: entries, Err: err}
 	}
+}
+
+// focusTickMsg drives the /focus overlay's fake animation forward, once per
+// focusTick() interval, for as long as a.focusActive stays true.
+type focusTickMsg struct{}
+
+// focusTick schedules the next /focus overlay animation frame.
+func focusTick() tea.Cmd {
+	return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+		return focusTickMsg{}
+	})
 }
 
 func (a *App) tickPosition() tea.Cmd {
